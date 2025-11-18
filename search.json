@@ -1,0 +1,1127 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Main page - portfolio",
+    "section": "",
+    "text": "Individual articles are divided into sections\nIf you have any questions, please contact me"
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html",
+    "href": "wl-tune-bayes-parallel.html",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "",
+    "text": "The main topics of this article are parameter selection and parallel computing. A Random Forest model will be constructed, whose parameters will be selected using Bayesian methods.\nCommon problems in ML include selecting hyperparameters and calculating them efficiently. One of the most effective methods for calculating hyperparameters is Bayesian optimization. This is implemented in the tune_bayes function. Another package used will be doFuture for parallel computations. Standard data science libraries, such as tidymodels, dplyr, etc., will also be utilized.\nTherefore, the primary task of the project will be to develop functions for a time-efficient random forest model. The choice of random forests is justified by the method’s high efficiency and its superior use of parallelism compared to Gradient Boosting methods.\nThe “Diamonds” data set will be used as the data set and the clarity column will be predicted.\n\n\n\n  library(dplyr)\n  library(tidymodels)\n  library(doFuture)\n  library(tictoc)\n  library(ranger)\n  library(DT)\n  library(plotly)\n  library(gt)",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html#introduction",
+    "href": "wl-tune-bayes-parallel.html#introduction",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "",
+    "text": "The main topics of this article are parameter selection and parallel computing. A Random Forest model will be constructed, whose parameters will be selected using Bayesian methods.\nCommon problems in ML include selecting hyperparameters and calculating them efficiently. One of the most effective methods for calculating hyperparameters is Bayesian optimization. This is implemented in the tune_bayes function. Another package used will be doFuture for parallel computations. Standard data science libraries, such as tidymodels, dplyr, etc., will also be utilized.\nTherefore, the primary task of the project will be to develop functions for a time-efficient random forest model. The choice of random forests is justified by the method’s high efficiency and its superior use of parallelism compared to Gradient Boosting methods.\nThe “Diamonds” data set will be used as the data set and the clarity column will be predicted.\n\n\n\n  library(dplyr)\n  library(tidymodels)\n  library(doFuture)\n  library(tictoc)\n  library(ranger)\n  library(DT)\n  library(plotly)\n  library(gt)",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html#data-preprocessing",
+    "href": "wl-tune-bayes-parallel.html#data-preprocessing",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "2. Data preprocessing",
+    "text": "2. Data preprocessing\nAt first we have to convert clarity to unordered factor. Second step is to divide data into training and testing part by using initial_split function.\n\nprepare_data &lt;- function(diamonds_df) {\n  # Convert clarity to unordered factor\n  diamonds_df &lt;- diamonds_df %&gt;%\n    mutate(clarity = factor(clarity, ordered = FALSE))\n  \n  # Split data\n  diamonds_split &lt;- initial_split(diamonds_df, prop = 0.8, strata = clarity)\n  list(\n    training = training(diamonds_split),\n    testing = testing(diamonds_split),\n    split = diamonds_split\n  )\n}\n\nSecond step of preprocessing is to define recipe of data and random forest model. The recipe specifies what data transformation steps must be performed to make the data ready for the model. The first step is step_corr - removing multiple correlated columns to prevent duplicate information. The next step is data normalization - to prevent the data from becoming information that has high numerical significance. The last step is step_dummy - converting categorical data into numbers.\nNext, we instantiate the model—the rand_forest function serves as an interface to the ranger model, and the mtry and min_n hyperparameters will be optimized. We assume 100 as the number of trees.\nThe combination of recipe and model creates a workflow - this allows you to write shorter code later.\n\nsetup_model &lt;- function(training_data) {\n  rf_recipe &lt;- recipe(clarity ~ ., data = training_data) %&gt;%\n    step_corr() %&gt;%\n    step_normalize(all_numeric_predictors()) %&gt;%\n    step_dummy(all_nominal_predictors(), one_hot = TRUE)\n  \n  rf_model &lt;- rand_forest(\n    mtry = tune(),\n    min_n = tune(),\n    trees = 100\n  ) %&gt;%\n    set_engine(\"ranger\") %&gt;%\n    set_mode(\"classification\")\n  \n  rf_workflow &lt;- workflow() %&gt;%\n    add_recipe(rf_recipe) %&gt;%\n    add_model(rf_model)\n  \n  list(recipe = rf_recipe, model = rf_model, workflow = rf_workflow)\n}",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html#model-tune-and-training",
+    "href": "wl-tune-bayes-parallel.html#model-tune-and-training",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "3. Model tune and training",
+    "text": "3. Model tune and training\nThe beginning of hyperparameter tuning is choosing whether we want the computation to be parallel or not.\nThe next step is to select the V-Fold cross-validation object. This is used for model training, where the training set is divided into a specified number of parts—usually 5 or 10—in the example, 3 for simplicity. Then, in the subsequent steps, one-third of the training set is used for validation, the remaining two for training. Then, one of the parts previously used for training will be used for validation, while the previously used validation portion and the remaining training portion will be used for training, and so on. The vfold_cv function will be used for this purpose.\n\nBayesian optimization for hyperparameter tuning\nThen, the Bayesian hyperparameter search mechanism is implemented.\nThe first step is to create a sample hyperparameter tuning model so that the Bayesian optimizer can later “see” what this process entails. For this purpose, an initial_results object will be created—a simple hyperparameter tuning object from a specified set — rf_grid.\nBayesian optimization doesn’t evaluate all possible hyperparameter options; it learns how hyperparameters affect the outcome and uses probabilistic methods to select the best ones. This provides a significant time saving compared to grid_search.\nIn order to obtain a set of the best hyperparameters, we create a tune_bayes object, the main element of which is the result of an example hyperparameter optimization using the initial_results method and the hyperparameter space optimized for a specific data set from the finalize function.\nThe next step is to obtain the best hyperparameters. These are obtained via the select_best function, which specifies the metric and tuning object.\nWe then apply the hyperparameters to the model through the workflow it is part of - using the finalize_workflow function.\nWorkflow with optimized hyperparameters can be used for training using the fit function.\n\ntune_and_train &lt;- function(workflow, training_data, future = FALSE) {\n  if (future) {\n    n_cores &lt;- parallel::detectCores() - 1\n    registerDoFuture()\n    plan(multisession, workers = n_cores)\n  } else {\n    plan(sequential)\n  }\n  \n  rf_cv_folds &lt;- vfold_cv(training_data, v = 3)\n  \n  rf_grid &lt;- expand.grid(\n    mtry = c(2, 3, 5, 7),\n    min_n = c(5, 10, 30)\n  )\n  \n  initial_results &lt;- tune_grid(\n    workflow,\n    resamples = rf_cv_folds,\n    grid = rf_grid,\n    metrics = metric_set(accuracy, roc_auc),\n    control = control_grid(verbose = TRUE)\n  )\n  \n  rf_params &lt;- parameters(workflow) %&gt;%\n    finalize(training_data)\n  \n  set.seed(123)\n  bayes_results &lt;- tune_bayes(\n    workflow,\n    resamples = rf_cv_folds,\n    param_info = rf_params,\n    initial = initial_results,\n    iter = 2,\n    metrics = metric_set(accuracy, roc_auc),\n    control = control_bayes(verbose = TRUE, no_improve = 5)\n  )\n  \n  best_rf_params &lt;- select_best(bayes_results, metric = \"roc_auc\")\n  final_workflow &lt;- finalize_workflow(workflow, best_rf_params)\n  \n  final_fit &lt;- fit(final_workflow, data = training_data)\n  \n  list(\n    final_fit = final_fit,\n    bayes_results = bayes_results,\n    best_rf_params = best_rf_params \n  )\n}",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html#model-evaluation",
+    "href": "wl-tune-bayes-parallel.html#model-evaluation",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "4. Model evaluation",
+    "text": "4. Model evaluation\nOnce the model is trained, predictions can be made on the test set. This is achieved using the predict function.\nPredictions enable the calculation of metrics - accuracy, kappa, and ROC-AUC. Additionally, a confusion matrix and ROC curve data are computed for visualization.\n\npredict_and_evaluate &lt;- function(final_fit, testing_data) {\n  preds_class &lt;- predict(final_fit, testing_data, type = \"class\")\n  preds_prob &lt;- predict(final_fit, testing_data, type = \"prob\")\n  preds &lt;- bind_cols(testing_data, preds_class, preds_prob)\n  \n  metrics_rf &lt;- metrics(preds, truth = clarity, estimate = .pred_class)\n  roc_auc_rf &lt;- roc_auc(preds, truth = clarity, starts_with(\".pred_\"), -.pred_class)\n  conf_matrix &lt;- conf_mat(preds, truth = clarity, estimate = .pred_class)\n  roc_curve_data &lt;- roc_curve(preds, truth = clarity, starts_with(\".pred_\"), -.pred_class)\n  \n  list(\n    metrics_rf = metrics_rf,\n    roc_auc_rf = roc_auc_rf,\n    conf_matrix = conf_matrix,\n    roc_curve_data = roc_curve_data\n  )\n}",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html#final-function",
+    "href": "wl-tune-bayes-parallel.html#final-function",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "5. Final function",
+    "text": "5. Final function\nThe functionalities obtained in the previous steps can be combined into one function.\n\ncalculate_clarity_rf &lt;- function(diamonds_df, future = FALSE) {\n  data &lt;- prepare_data(diamonds_df)\n  model_setup &lt;- setup_model(data$training)\n  \n  training_results &lt;- tune_and_train(model_setup$workflow, data$training, future)\n  \n  results &lt;- predict_and_evaluate(training_results$final_fit, data$testing)\n  \n  list(\n    metrics = results,\n    best_params = training_results$best_rf_params \n  )\n}",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html#comparison-of-sequential-and-parallel-function",
+    "href": "wl-tune-bayes-parallel.html#comparison-of-sequential-and-parallel-function",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "6. Comparison of sequential and parallel function",
+    "text": "6. Comparison of sequential and parallel function\nTwo calls to the final function allow us to assess whether there is a significant speedup in its execution if parallel computations are enabled.\n\n# Test czasu bez równoległości\ntic(\"Sequential RF\")\nres_sequential &lt;- calculate_clarity_rf(diamonds, future = FALSE)\ntoc()\n\nSequential RF: 184.48 sec elapsed\n\n\n\n# Test czasu z równoległością\ntic(\"Parallel RF\")\nres_parallel &lt;- calculate_clarity_rf(diamonds, future = TRUE)\ntoc()\n\nParallel RF: 108.03 sec elapsed\n\n\n\nSequential - results\nMetrics - Accuracy and Cohen’s Kappa\nAccuracy is the percentage of diamonds that are correctly graded for clarity.\nThe Kappa method is less commonly used, but it accounts for chance agreement—that is, if labels were assigned randomly while maintaining the proportion of classes. As a result, Kappa handles imbalanced classes well—as in this case, where clarity varies in abundance across the diamond set.\n\nggplot(diamonds, aes(x = clarity))+\n  geom_bar(fill = \"red\")+\n  labs(\n    title = \"Number of clarity class occurrences\",\n    subtitle = \"Allows to assess the usefulness of the Kappa metric\",\n    caption = \"Diamonds data set\"\n  )\n\n\n\n\n\n\n\n\nThe bar chart allows us to conclude that the Kappa metric is indicated.\n\ndatatable(res_sequential$metrics$metrics_rf,\n          rownames = FALSE,\n          options = list(\n            searching = FALSE,\n            paging = FALSE,\n            info = FALSE\n          ))\n\n\n\n\n\nThe Kappa metric has a lower value than accuracy - perhaps the model has learned to more frequently occurring classes.\nMetric - ROC-AUC\nAveraged ROC-AUC value for all clarity classes\nThis is the area under the ROC curve discussed later in this paper.\n\ndatatable(res_sequential$metrics$roc_auc_rf,\n          rownames = FALSE,\n          options = list(\n            searching = FALSE,\n            paging = FALSE,\n            info = FALSE\n          ))\n\n\n\n\n\nThe result is good (1 = perfect model, 0.5 = random guess), but the averaging means we don’t have a clear picture of the performance in individual classes. The ROC curves will explain this later.\nHyperparameters used for model\n\ndatatable(res_sequential$best_params,\n          rownames = FALSE,\n          options = list(\n            searching = FALSE,\n            paging = FALSE,\n            info = FALSE\n          ))\n\n\n\n\n\nStopping the splitting after reaching two-element groups indicates that the model must analyze many features, and therefore is complex and analyzes diamonds with high detail. However, there is a risk of overfitting with such a complex model.\nA nine-element feature set—mtry—means that all available columns in the diamonds set are used, which means the Random Forest model will perform similarly to a Bagging Classifier. This loses an important property of the Random Forest—the randomness of the features in a given tree. This is another factor that increases the risk of overfitting.\n\n\nParallel - results\nMetrics - Accuracy and Cohen’s Kappa\n\ndatatable(res_parallel$metrics$metrics_rf,\n          rownames = FALSE,\n          options = list(\n            searching = FALSE,\n            paging = FALSE,\n            info = FALSE\n          ))\n\n\n\n\n\nMetric - ROC-AUC\n\ndatatable(res_parallel$metrics$roc_auc_rf,\n          rownames = FALSE,\n          options = list(\n            searching = FALSE,\n            paging = FALSE,\n            info = FALSE\n          ))\n\n\n\n\n\nHyperparameters used for model\n\ndatatable(res_parallel$best_params,\n          rownames = FALSE,\n          options = list(\n            searching = FALSE,\n            paging = FALSE,\n            info = FALSE\n          ))",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html#model-visualizations",
+    "href": "wl-tune-bayes-parallel.html#model-visualizations",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "7. Model Visualizations",
+    "text": "7. Model Visualizations\nThis subchapter will graphically present the effects of model evaluation - the confusion matrix and the ROC curve - the basic graphical metrics in the classification task.\n\nConfusion Matrix and ROC Curve - Sequential\nThe Confusion Matrix clearly illustrates the difference between the prediction result and the actual value.\n\ncm_seq &lt;- as.data.frame(res_sequential$metrics$conf_matrix$table)\nfig_cm &lt;- plot_ly(\n  x = cm_seq$Prediction,\n  y = cm_seq$Truth,\n  z = cm_seq$Freq,\n  type = \"heatmap\",\n  colorscale = \"Reds\",\n  showscale = TRUE,\n  text = paste(\"Truth:\", cm_seq$Truth,\n               \"&lt;br&gt;Prediction:\", cm_seq$Prediction,\n               \"&lt;br&gt;Count:\", cm_seq$Freq),\n  hoverinfo = \"text\"\n) %&gt;%\n  layout(\n    title = \"Confusion Matrix\",\n    xaxis = list(title = \"Predicted clarity\",\n                 tickangle = -45),\n    yaxis = list(title = \"True clarity\",\n                 autorange = \"reversed\"),\n    margin = list(l = 80, b = 80, t = 80, r = 80)\n  )\n\nfig_cm &lt;- fig_cm %&gt;%\n  add_annotations(\n    x = cm_seq$Prediction,\n    y = cm_seq$Truth,\n    text = cm_seq$Freq,\n    showarrow = FALSE,\n    font = list(color = \"black\", size = 12)\n  )\n\n\n\n\n\n\n\nIt is clearly visible that most of the predictions are correct, but when they are not correct - most often the predicted purity class is close to the actual one.\nAnother metric is the ROC curve, which shows how the metrics change when the membership threshold changes - from zero to one hundred percent.\n\nroc_seq &lt;- res_sequential$metrics$roc_curve_data\nfig_roc &lt;- plot_ly() %&gt;%\n  add_lines(\n    data = roc_seq,\n    x = ~1 - specificity,\n    y = ~sensitivity,\n    color = ~.level,  \n    mode = \"lines\"\n  ) %&gt;%\n  layout(\n    title = \"ROC Curve\",\n    xaxis = list(title = \"1 - Specificity\"),\n    yaxis = list(title = \"Sensitivity\"),\n    legend = list(title = list(text = \"Class\")) \n  )\n\n\n\n\n\n\n\nIt is clear that the results are good, but they vary depending on what diamond clarity class we want to predict.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "wl-tune-bayes-parallel.html#conclusion",
+    "href": "wl-tune-bayes-parallel.html#conclusion",
+    "title": "Random Forests - obtaining model hyperparameters by Bayesian optimization using parallel computing",
+    "section": "8. Conclusion",
+    "text": "8. Conclusion\nThe resulting hyperparameter sets allowed us to obtain an effective model that provided good metrics. Similarly, the use of parallel computations accelerated the execution time of the main function.\nHowever, it should be noted that the obtained speedup was not proportional to the number of available processors. The limitation of parallel processing results from the nature of hyperparameter selection using the adopted methods and other factors that cause sequential processing.\nThe obtained ROC curves allowed us to determine which diamond clarity classes are most easily predicted. The I1 and IF classes are best predicted by the developed model. Thus, the model’s predictive ability varies depending on the diamond clarity class, but in all cases, it demonstrates high efficiency.\nHowever, the designed model has a drawback – potential susceptibility to overfitting. The number of features analyzed by the trees causes the model to operate as a Bagging Classifier instead of a Random Forest – this in itself increases the risk of overfitting. Similarly, a small number of leaf elements indicates excessive model complexity. Therefore, when implementing the model, its performance should be monitored, especially on unusual data, dissimilar to that used for training.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Bayesian Tune"
+    ]
+  },
+  {
+    "objectID": "about.html",
+    "href": "about.html",
+    "title": "About",
+    "section": "",
+    "text": "About me\nMy name is Wojciech.\nI’m interested in data and have experience in Python, R, and Scala.\nI’ve created ELT/ETL pipelines and co-developed systems that utilize data from these pipelines for analysis. I’ve worked in both data engineering and data analysis. I also possess a range of machine learning skills, including practical implementations in real-world problems."
+  },
+  {
+    "objectID": "wl-infer-4.html",
+    "href": "wl-infer-4.html",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "",
+    "text": "A common problem in jewelry stores is the division of diamonds into price categories, so that the number of shelves for each category can be optimally selected, as well as the shelf design to facilitate the presentation of diamonds in a given category - so that the diamond colors dominant in a given category look their best.\n\n\nThis paper will describe the clustering problem using the example of dividing a diamond dataset into four logical parts.\nSimply assigning a cluster to a row doesn’t really add anything. However, if a relationship between the cluster and other columns is discovered, the cluster to which the row belongs provides some information. To obtain information about the relationship between the cluster and existing columns, statistical methods—primarily hypothesis testing—can be used.\nTherefore, a clustering of the diamond set will be carried out and then the relationships between:\n\ndiamond depth and price (unrelated to the cluster, but intended to demonstrate the infer package methodology)\ncluster and diamond price (based on F-statistics)\ncluster and diamond color (based on chi-square statistic)\n\nFinally, conclusions will be presented.",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#introduction",
+    "href": "wl-infer-4.html#introduction",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "",
+    "text": "A common problem in jewelry stores is the division of diamonds into price categories, so that the number of shelves for each category can be optimally selected, as well as the shelf design to facilitate the presentation of diamonds in a given category - so that the diamond colors dominant in a given category look their best.\n\n\nThis paper will describe the clustering problem using the example of dividing a diamond dataset into four logical parts.\nSimply assigning a cluster to a row doesn’t really add anything. However, if a relationship between the cluster and other columns is discovered, the cluster to which the row belongs provides some information. To obtain information about the relationship between the cluster and existing columns, statistical methods—primarily hypothesis testing—can be used.\nTherefore, a clustering of the diamond set will be carried out and then the relationships between:\n\ndiamond depth and price (unrelated to the cluster, but intended to demonstrate the infer package methodology)\ncluster and diamond price (based on F-statistics)\ncluster and diamond color (based on chi-square statistic)\n\nFinally, conclusions will be presented.",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#loading-libraries",
+    "href": "wl-infer-4.html#loading-libraries",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Loading libraries",
+    "text": "Loading libraries\nThe first step is to load the appropriate libraries\n\nlibrary(tidyclust)\nlibrary(dplyr)\nlibrary(tidymodels)\nlibrary(ggplot2)\nlibrary(DT)\nlibrary(infer)\nlibrary(clustMixType)\nlibrary(tidyr)\nlibrary(corrplot)\nlibrary(RColorBrewer)\nlibrary(viridis)",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#loading-a-data",
+    "href": "wl-infer-4.html#loading-a-data",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Loading a data",
+    "text": "Loading a data\nThe diamond dataset is being loaded\n\ndata(\"diamonds\")\n\n\ndatatable(head(diamonds, caption = \"First few rows of diamonds dataset\"))",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#using-the-elbow-method-to-determine-the-number-of-clusters",
+    "href": "wl-infer-4.html#using-the-elbow-method-to-determine-the-number-of-clusters",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Using the elbow method to determine the number of clusters",
+    "text": "Using the elbow method to determine the number of clusters\nFirst of all, the data is standardized\n\ndiamonds_for_elbow &lt;- diamonds %&gt;% \n  select(where(is.numeric)) %&gt;% \n  scale() \n\nA statistical summary data frame is then created with the number of clusters ranging from one to ten.\n\nk_grid &lt;- tibble(k = 1:10) %&gt;%\n  mutate(\n    kclust = map(k, ~kmeans(diamonds_for_elbow, centers = .x, nstart = 25)),\n    glanced = map(kclust, glance)\n  )\n\nNext, we unpack the contents of the individual statistical summaries\n\nk_summary &lt;- k_grid %&gt;%\n  unnest(glanced)\n\nFinally, one can draw a graph of the dependence of the cluster on the within-cluster sum of squares, which determines the coherence of the cluster - the closer they lie to the centroids, the smaller this distance.\n\nlibrary(RColorBrewer)\nggplot(k_summary, aes(x = k, y = tot.withinss)) +\n  geom_line(color = brewer.pal(3, \"Set2\")[1], linewidth = 1.2) +\n  geom_point(size = 4, color = brewer.pal(3, \"Set2\")[1]) +\n  geom_vline(xintercept = 4, linetype = \"dashed\", color = \"red\", linewidth = 1) +\n  annotate(\"text\", x = 4.5, y = max(k_summary$tot.withinss) * 0.9, \n           label = \"Optimal k=4\", color = \"red\", hjust = 0) +\n  labs(\n    title = \"Elbow Method for Optimal Number of Clusters\",\n    subtitle = \"Lower WCSS indicates more cohesive clusters\",\n    x = \"Number of Clusters (k)\",\n    y = \"Total Within-Cluster Sum of Squares (WCSS)\",\n    caption = \"Source: Diamonds dataset analysis\"\n  ) +\n  scale_x_continuous(breaks = 1:10) +\n  theme_minimal(base_size = 12) +\n  theme(\n    plot.title = element_text(face = \"bold\", size = 14),\n    plot.subtitle = element_text(size = 10, color = \"grey50\"),\n    panel.grid.major = element_line(color = \"grey80\"),\n    panel.grid.minor = element_blank()\n  )\n\n\n\n\n\n\n\n\nBased on the graph, the number of clusters equal to four can be assumed as optimal.",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#filtering-a-data---domain-knowledge",
+    "href": "wl-infer-4.html#filtering-a-data---domain-knowledge",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Filtering a data - domain knowledge",
+    "text": "Filtering a data - domain knowledge\nDue to the relationship between the mass of a diamond and its size, the columns of sizes are removed and the column of diamond mass is left.\n\ndiamonds_num &lt;- diamonds %&gt;% select(-x, -y, -z)",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#data-preprocessing",
+    "href": "wl-infer-4.html#data-preprocessing",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Data preprocessing",
+    "text": "Data preprocessing\nThis section will present the process of preparing data for the model not based on domain knowledge, but on transformations and calculations.\n\nRemoving correlated columns\nMultiple columns with high correlations duplicate information fed into the model, which creates confusion and makes training more difficult. Therefore, correlated columns in the data should be removed, leaving only the first correlated column.\n\ncorrelation_matrix &lt;- diamonds_num %&gt;%\n  select(where(is.numeric)) %&gt;%\n  cor(method = \"pearson\")\n\nThen it is easy to display the resulting visualization\n\ncorrplot(correlation_matrix,\n         method = \"color\",\n         col = brewer.pal(n = 10, name = \"RdBu\"), # Kontrastowa paleta\n         addCoef.col = \"black\",\n         tl.col = \"black\",\n         tl.srt = 45,\n         tl.cex = 1.1, # Większe etykiety\n         number.cex = 0.8, # Rozmiar współczynników\n         title = \"Correlation Matrix of Numeric Features in Diamonds Dataset\",\n         mar = c(0, 0, 2, 0) # Margines na tytuł\n)\n\n\n\n\n\n\n\n\nBased on the above chart, the carat column is removed, which duplicates the information from the price column\n\ndiamonds_num &lt;- diamonds %&gt;% select(-carat)\n\n\n\nData standardization\nThe second step is to standardize the numerical data. To do this, we’ll create a recipe that allows us to obtain a data frame with standardized numerical data.\n\nscaled_numeric_columns &lt;- recipe(~., data = diamonds_num) %&gt;%\n  step_rm(all_nominal()) %&gt;% \n  step_normalize(all_numeric()) %&gt;%\n  prep() %&gt;%\n  bake(new_data = NULL)\n\nThen we replace the previous numeric columns with the new ones\n\ndiamonds_num &lt;- diamonds_num %&gt;%\n  select(-where(is.numeric)) %&gt;%\n  bind_cols(scaled_numeric_columns)\n\nAfter transformations, the data looks like below\n\ndatatable(head(diamonds, caption = \"First few rows of diamonds dataset - ready for k_prototypes\"))",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#model-of-clustering",
+    "href": "wl-infer-4.html#model-of-clustering",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Model of clustering",
+    "text": "Model of clustering\nDiamonds dataset will divided into four subsets - clusters - this is topic of that section\nAt first - model to do clustering is instancied\nThe model that will perform clustering was selected. The k-means function was chosen as the model’s “interface,” but due to the presence of both categorical and numerical data, the clustMixType model was chosen.\n\nmodel &lt;- k_means(num_clusters = 4) %&gt;%\n  set_engine(\"clustMixType\")",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#model---fit",
+    "href": "wl-infer-4.html#model---fit",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Model - fit",
+    "text": "Model - fit\nThe model is trained on all available data\n\nfitted_model &lt;- fit(model, ~ ., data = diamonds_num)",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#prediction-using-fitted-model",
+    "href": "wl-infer-4.html#prediction-using-fitted-model",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Prediction using fitted model",
+    "text": "Prediction using fitted model\nAppending a cluster column to existing columns\n\naugmented_data &lt;- augment(fitted_model, new_data = diamonds_num)\n\nHead of new dataset\n\ndatatable(head(augmented_data, caption = \"First few rows of augmented_data\"))\n\n\n\n\n\nIt is clearly visible that the column with the cluster designation has been added correctly.",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#hypotesis-testing",
+    "href": "wl-infer-4.html#hypotesis-testing",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Hypotesis testing",
+    "text": "Hypotesis testing\nThis section will test three hypotheses: the first concerns numerical variables and aims to demonstrate the infer package’s operation using an intuitive correlation example. The other two will be based on more advanced statistics: F and chi-square.\n\nCorrelation of depth and price (demonstration of the infer methodology)\nTo understand the infer methodology, an example will be presented to determine the relationship between depth and price of a diamond.\nInitially, the Pearson statistic is calculated for the actual data distribution\n\nobs_corr &lt;- augmented_data %&gt;%\n  specify(depth ~ price) %&gt;%      \n  calculate(stat = \"correlation\") \n\nThen the statistic is calculated 2000 times (the value generally accepted in the literature) - for the distribution with swapped values of depth and diamond price. We put forward the null hypothesis - no relationship between depth and diamond price.\nThe null hypothesis (H0) is formed - there is no relationship between depth and diamond price. Hypothesis H1 says the opposite.\n\nnull_corr &lt;- augmented_data %&gt;%\n  specify(depth ~ price) %&gt;%      \n  hypothesize(null = \"independence\") %&gt;%  # H0: brak związku\n  generate(reps = 2000, type = \"permute\") %&gt;%\n  calculate(stat = \"correlation\")   \n\nThe null hypothesis assumed no relationship between depth and diamond price. We calculated the probability that the calculated Pearson statistic value would be obtained in the absence of a relationship.\n\np_val_corr &lt;- get_p_value(null_corr, obs_corr, direction = \"greater\")\np_val_corr \n\n# A tibble: 1 × 1\n  p_value\n    &lt;dbl&gt;\n1   0.996\n\n\nThe value of the statistic is marked on the null distribution graph - if it is outside the range, we reject the null hypothesis.\n\nvisualize(null_corr) +\n  shade_p_value(obs_corr, direction = \"greater\") +\n  labs(\n    title = paste(\"Null distr., Pearson correlation statistic =\", ... =    round(obs_corr$stat[1],2))\n  )\n\n\n\n\n\n\n\n\nBased on the above results, we accept the null hypothesis - there is a NO relationship between the depth of the diamond and its price\n\n\nRelationship between assigned cluster and price\nThe purpose of this section is to determine whether a relationship exists between the assigned cluster and the price of a diamond. As in the previous example, the null distribution statistic and the value are calculated. Because we are determining a relationship between a categorical (cluster) and a numerical data item, the F statistic will be used.\n\nobs_f &lt;- augmented_data %&gt;%\n  specify(price ~ .pred_cluster) %&gt;%    \n  calculate(stat = \"F\")   \n\nAs before, the hypothesis of no relationship is put forward. Hypothesis H1 says the opposite - there is a relationship price - cluster.\n\nnull_f &lt;- augmented_data %&gt;%\n  specify(price ~ .pred_cluster) %&gt;%  \n  hypothesize(null = \"independence\") %&gt;%\n  generate(reps = 2000, type = \"permute\") %&gt;%\n  calculate(stat = \"F\")  \n\nThe meaning of p is analogous to the previous one, but it concerns the relationship between cluster and price\n\np_val_f &lt;- get_p_value(null_f, obs_f, direction = \"greater\")\n\nWarning: Please be cautious in reporting a p-value of 0. This result is an approximation\nbased on the number of `reps` chosen in the `generate()` step.\nℹ See `get_p_value()` (`?infer::get_p_value()`) for more information.\n\np_val_f \n\n# A tibble: 1 × 1\n  p_value\n    &lt;dbl&gt;\n1       0\n\n\nVisualization of the null distribution graph\n\nvisualize(null_f) +\n  xlim(0, 5)+\n  shade_p_value(obs_f, direction = \"greater\") +\n  labs(\n    title = paste(\"Null distr., F statistic =\", round(obs_f$stat[1],2))\n  )\n\n\n\n\n\n\n\n\nBased on the data obtained above, the null hypothesis is rejected - there is a relationship between the price of a diamond and the assigned cluster.\n\nVerification of the adopted hypothesis\nTo verify the hypothesis, a graph will be prepared illustrating the relationship between clusters, the number of available diamonds, and average prices. If individual clusters exhibit a common trend in the number of available diamonds, this indicates that they may differ in price – the fewer diamonds of a given type/cluster, the more expensive they should be. This relationship will then be visualized directly.\nFirst, the quantity-cluster relationship will be illustrated.\n\nggplot(augmented_data, aes(x = .pred_cluster, fill = .pred_cluster)) +\n  geom_bar() +\n  geom_text(aes(label = ..count..), stat = \"count\", vjust = -0.3, size = 4) +\n  scale_fill_viridis_d(option = \"C\", begin = 0.2, end = 0.8) +\n  labs(\n    title = \"Distribution of Diamonds Across Clusters\",\n    subtitle = \"Each bar represents the number of diamonds in a cluster\",\n    x = \"Cluster\",\n    y = \"Count of Diamonds\",\n    caption = \"Source: Diamonds dataset analysis\"\n  ) +\n  theme_minimal(base_size = 12) +\n  theme(\n    plot.title = element_text(face = \"bold\", size = 14),\n    plot.subtitle = element_text(size = 10, color = \"grey50\"),\n    legend.position = \"none\" # Usunięcie legendy, bo kolory nie są kluczowe\n  )\n\n\n\n\n\n\n\n\nThen, in order to directly evaluate the average price in a given category, we transform the data through grouping and aggregation.\n\naugmented_data_denorm_price &lt;- augmented_data %&gt;%\n  mutate(price = diamonds$price)\n\n\naugmented_data_summary_price &lt;- augmented_data_denorm_price %&gt;%\n  select(price, .pred_cluster) %&gt;%\n  group_by(.pred_cluster) %&gt;%\n  summarise(across(where(is.numeric), median),\n            count = n())\n\nPlot of relations of price - cluster - count of diamonds in cluster\n\nggplot(augmented_data_summary_price, aes(x = .pred_cluster, y = count, fill = price)) +\n  geom_col() +  \n  geom_text(aes(label = paste(\"Median price\",round(price, 0))), vjust = -0.5, size = 3.5) +\n  scale_fill_gradient(low = \"lightgreen\", high = \"darkgreen\") +\n  labs(title = \"Heatmap of price and count of\",\n       subtitle = \"High of each bar represents the number of diamonds in a cluster\",\n       x = \"Cluster\",\n       y = \"Count of diamonds\", \n       fill = \"Median price\",\n       caption = \"Source: Diamonds dataset analysis\") +\n  theme_minimal() +\n  scale_y_continuous(labels = scales::comma) \n\n\n\n\n\n\n\n\nThe analysis of the above graphs allows us to confirm the adopted hypothesis (H1 - there is a relation) about the relationship between the assigned cluster and the diamond price. However, when analyzing both charts above, some unspecified factor - apart from price - influences the division of clusters.\n\n\n\nRelationship between assigned cluster and color\nTo determine the relationship between cluster and color, the chi-square statistic will be calculated - as the relationship between categorical values is assessed.\nThe procedure is similar to the previous one.\n\nobs_chisq &lt;- augmented_data %&gt;%\n  specify(color ~ .pred_cluster) %&gt;%      \n  calculate(stat = \"chisq\")    \n\nAs before - the null hypothesis says that there is no relationship between cluster and price\n\nnull_chisq &lt;- augmented_data %&gt;%\n  specify(color ~ .pred_cluster) %&gt;%\n  hypothesize(null = \"independence\") %&gt;%  \n  generate(reps = 2000, type = \"permute\") %&gt;%\n  calculate(stat = \"chisq\")\n\nSimilarly to the previous example, the p value is calculated\n\np_val_chisq &lt;- get_p_value(null_chisq, obs_chisq, direction = \"greater\")\n\nWarning: Please be cautious in reporting a p-value of 0. This result is an approximation\nbased on the number of `reps` chosen in the `generate()` step.\nℹ See `get_p_value()` (`?infer::get_p_value()`) for more information.\n\np_val_chisq\n\n# A tibble: 1 × 1\n  p_value\n    &lt;dbl&gt;\n1       0\n\n\n\nvisualize(null_chisq) +\n  xlim(0, 100)+\n  labs(\n    title = paste(\"Null distr., chi-sq statistic =\", round(obs_chisq$stat[1],2))\n  )\n\n\n\n\n\n\n\n\nBased on the data obtained above, the null hypothesis is rejected - there is relationship between the color of a diamond and the assigned cluster.\n\nVerification of the adopted hypothesis\nAs in the previous hypothesis, graphs are created to assess the correctness of the adopted hypothesis.\nFirst, you need to group the data by the color of the diamond and perform aggregation - the sum of occurrences\n\naugmented_data_for_color &lt;- augmented_data %&gt;%\n  group_by(color) %&gt;%\n  summarise(count_of_color= n())\n\nThen we draw a graph of the number of diamonds of a given color in the entire set, without dividing them into clusters.\n\nggplot(augmented_data_for_color, aes(x = color, y = count_of_color, fill = color)) +\n  stat_summary(fun = sum, geom = \"bar\") +\n  labs(x = \"Color\", y = \"Total count\", title = \"Distribution of colors in the whole dataset\",\n      subtitle = \"Individual colors - number of occurrences\",\n      caption = \"Diamond dataset after color-quantity aggregation\") +\n  theme_minimal()\n\n\n\n\n\n\n\n\nNext, you should examine the proportion of diamonds in each cluster. By comparing the proportions with the previously obtained bar chart, you can assess how closely the color proportions in each cluster compare to the overall set.\nFirst, it is necessary to group the data appropriately\n\ndiamonds_cluster_color &lt;- augmented_data %&gt;%\n  group_by(.pred_cluster, color) %&gt;%\n  summarise(count_of_color = n(), .groups = \"drop\") %&gt;%\n  group_by(.pred_cluster) %&gt;%\n  mutate(percentage = count_of_color / sum(count_of_color) * 100) %&gt;%\n  select(-count_of_color)\n\nOnce you have grouped your data, you can easily draw the appropriate graph.\n\nggplot(diamonds_cluster_color, aes(x = color, y = .pred_cluster, fill = percentage)) +\n  geom_tile(color = \"white\", linewidth = 0.5) +\n  geom_text(\n    aes(\n      label = sprintf(\"%.1f%%\", percentage),\n      color = ifelse(percentage &gt; 18, \"white\", \"black\") \n    ), \n    size = 4\n  ) +\n  scale_color_identity() +\n  scale_fill_viridis_c(option = \"inferno\", direction = -1) +\n  labs(\n    title = \"Distribution of Diamond Colors Across Clusters\",\n    subtitle = \"Percentage of each color within clusters\",\n    x = \"Diamond Color\",\n    y = \"Cluster\",\n    fill = \"Percentage (%)\",\n    caption = \"Source: Diamonds dataset analysis\"\n  ) +\n  theme_minimal(base_size = 12) +\n  theme(\n    plot.title = element_text(face = \"bold\", size = 14),\n    plot.subtitle = element_text(size = 10, color = \"grey50\"),\n    panel.grid = element_blank()\n  )\n\n\n\n\n\n\n\n\nAnalyzing the two graphs above, it is clear that the distribution of colors in individual groups is often different from the distribution in the entire set. This confirms the hypothesis about the existence of a relationship between cluster membership and color.",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-infer-4.html#summary",
+    "href": "wl-infer-4.html#summary",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Summary",
+    "text": "Summary\nBy dividing the diamond collection into clusters, it can be concluded that the division was made primarily based on price. The cluster assigned is related to color but price is unrelated to the diamond’s depth.\nDue to the extreme p parameter values obtained — close to 0 or 1 — the probabilities of the accepted hypotheses are very high.\nIt should be noted that the two hypotheses adopted were confirmed by the analysis of the graphs of the relevant data.\n\nConclusions from a diamond shop’s point of view\nThe above analysis proved that dividing diamonds by color and price is possible, and thanks to the resulting model, it is possible to automate the cluster assignment process. This allows for the optimization of the number of diamond shelves and their arrangement when delivering new diamonds to a jewelry store.\nThe dataset was divided into four price categories. Dividing the diamonds into more price categories would not have provided much order, and merely separating diamonds into more than four categories would have been labor-intensive and would have yielded little. Furthermore, the goal of the analysis was achieved – it is known that different colors dominate in each price category, so the display can be adjusted. Therefore:\n\nDiamonds from cluster one should have a display that well highlights colors G and E – appropriate shelves and other display materials must be ordered.\nDiamonds from cluster two should have a display that well highlights color E.\nDiamonds from cluster three should have a display that well highlights colors F, G, and H.\nDiamonds from cluster four should have a display that well highlights colors G, H, and I.",
+    "crumbs": [
+      "Home",
+      "Machine Learning",
+      "K-means clustering and statistical inference"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html",
+    "href": "wl-fe.html",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "",
+    "text": "The problem addressed in this paper is feature engineering. Using the Diamonds dataset as an example, a model will be built to predict the clarity feature based on the remaining columns. In one case, the columns will have their original character—no new columns will be added. In the other case, a new column will be added, relating to the relationship between the diamond cut and weight.\nTo correctly identify the features that, after transformation, can lead to the clarity value, a series of statistical tests will be performed to determine which columns influence the value in the clarity column. Depending on the column type—categorical or numerical—different types of tests will be used.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#introduction",
+    "href": "wl-fe.html#introduction",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "",
+    "text": "The problem addressed in this paper is feature engineering. Using the Diamonds dataset as an example, a model will be built to predict the clarity feature based on the remaining columns. In one case, the columns will have their original character—no new columns will be added. In the other case, a new column will be added, relating to the relationship between the diamond cut and weight.\nTo correctly identify the features that, after transformation, can lead to the clarity value, a series of statistical tests will be performed to determine which columns influence the value in the clarity column. Depending on the column type—categorical or numerical—different types of tests will be used.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#loading-libraries-and-data",
+    "href": "wl-fe.html#loading-libraries-and-data",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "1. Loading libraries and data",
+    "text": "1. Loading libraries and data\n\nlibrary(ggplot2)\nlibrary(tidymodels)\nlibrary(dbscan)\nlibrary(dplyr)\nlibrary(viridis)\nlibrary(rcompanion)\nlibrary(effectsize)\nlibrary(knitr) \nlibrary(gt)\nlibrary(broom)\nlibrary(rstatix)\nlibrary(yardstick)\n\n\nset.seed(123)\n\n\ndata(\"diamonds\")",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#function-for-training-and-evaluating-the-model",
+    "href": "wl-fe.html#function-for-training-and-evaluating-the-model",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "2. Function for training and evaluating the model",
+    "text": "2. Function for training and evaluating the model\nTo train and evaluate the model, it’s necessary to create a function because the code will be used more than once. The resulting function would be quite large, so it would be broken down into several smaller ones.\n\nData preprocessing\nIn the first step of preprocessing, the data is divided into training and test data.\nNext, columns correlated with other existing ones are removed, the data is normalized (to prevent highly numerical data but low-level data from suppressing the information), and categorical data is converted to numerical data.\n\ndata_preprocessing &lt;- function(df) {\n    df &lt;- df %&gt;% select(-price)\n  \n  data_split &lt;- initial_split(df, prop = 0.75, strata = clarity)\n  training_data &lt;- training(data_split)\n  testing_data  &lt;- testing(data_split)\n  \n  xgb_recipe &lt;- recipe(clarity ~ ., data = training_data) %&gt;%\n    step_corr(all_numeric_predictors()) %&gt;%\n    step_normalize(all_numeric_predictors()) %&gt;%\n    step_dummy(all_nominal_predictors(), one_hot = TRUE)\n  \n  list(training_data = training_data, testing_data = testing_data, xgb_recipe = xgb_recipe)\n}\n\n\n\nModel fit and predict\nIn the next step, an instance of the model is created, trained, and makes predictions on the test data.\n\nprediction_results &lt;- function (preprocessing_results) {\n    xgb_spec &lt;- boost_tree(trees = 100, tree_depth = 9, learn_rate = 0.1) %&gt;%\n    set_engine(\"xgboost\") %&gt;%\n    set_mode(\"classification\")\n  \n  xgb_wf &lt;- workflow() %&gt;%\n    add_recipe(preprocessing_results$xgb_recipe) %&gt;%\n    add_model(xgb_spec)\n  \n  xgb_fit &lt;- fit(xgb_wf, data = preprocessing_results$training_data)\n  \n  results &lt;- predict(xgb_fit, preprocessing_results$testing_data, type = \"class\") %&gt;%\n    bind_cols(predict(xgb_fit, preprocessing_results$testing_data, type = \"prob\")) %&gt;%\n    bind_cols(truth = preprocessing_results$testing_data$clarity)\n}",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#final-function",
+    "href": "wl-fe.html#final-function",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "Final function",
+    "text": "Final function\nPreviously created functions are combined into one.\n\ntrain_and_evaluate_xgb &lt;- function(df) {\n  \n  preprocessing_results &lt;- data_preprocessing(df)\n\n  results &lt;- prediction_results(preprocessing_results)\n  \n  results_list &lt;- list(\n    f1_score = f_meas(results, truth = truth, estimate = .pred_class),\n    confusion_matrix = conf_mat(results, truth = truth, estimate = .pred_class)\n  )\n  \n  return(results_list)\n}",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#clarity-dependencies-on-other-columns",
+    "href": "wl-fe.html#clarity-dependencies-on-other-columns",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "3. Clarity dependencies on other columns",
+    "text": "3. Clarity dependencies on other columns\nTo extract features that determine clarity, a series of statistical tests should be performed on other columns. This will identify which columns most influence clarity, and by highlighting their features, it will be easier for the model to predict clarity.\n\nClarity - Color\n\ntbl_clarity_color &lt;- table(diamonds$color, diamonds$clarity)\n\nchisq.test(tbl_clarity_color) |&gt;\n  tidy() |&gt;\n  gt() |&gt;\n  tab_header(title = \"Test Chi-kwadrat\") |&gt;\n  tab_options(table.align = \"left\")\n\n\n\n\n\n\n\nTest Chi-kwadrat\n\n\nstatistic\np.value\nparameter\nmethod\n\n\n\n\n2047.079\n0\n42\nPearson's Chi-squared test\n\n\n\n\n\n\ntibble(\"Cramér's V\" = cramerV(tbl_clarity_color)) |&gt;\n  gt() |&gt;\n  tab_header(title = \"Cramér's V\") |&gt;\n  tab_options(table.align = \"left\")\n\n\n\n\n\n\n\nCramér's V\n\n\nCramér's V\n\n\n\n\n0.07953\n\n\n\n\n\n\n\n\n\nClarity - Cut\n\ntbl_cut_clarity &lt;- table(diamonds$cut, diamonds$clarity)\n\nchisq.test(tbl_cut_clarity) |&gt;\n  tidy() |&gt;\n  gt() |&gt;\n  tab_header(title = \"Test Chi-kwadrat\") |&gt;\n  tab_options(table.align = \"left\")\n\n\n\n\n\n\n\nTest Chi-kwadrat\n\n\nstatistic\np.value\nparameter\nmethod\n\n\n\n\n4391.398\n0\n28\nPearson's Chi-squared test\n\n\n\n\n\n\ntibble(\"Cramér's V\" = cramerV(tbl_cut_clarity)) |&gt;\n  gt() |&gt;\n  tab_header(title = \"Cramér's V\") |&gt;\n  tab_options(table.align = \"left\")\n\n\n\n\n\n\n\nCramér's V\n\n\nCramér's V\n\n\n\n\n0.1427\n\n\n\n\n\n\n\n\n\nClarity - numeric columns\n\nnumeric_vars &lt;- c(\"carat\", \"depth\", \"table\", \"price\")\nindep_var &lt;- \"clarity\"\n\nresults &lt;- lapply(numeric_vars, function(var) {\n  f &lt;- as.formula(paste(var, \"~\", indep_var))\n  model &lt;- aov(f, data = diamonds)\n  \n  # Extract ANOVA p-value\n  pval &lt;- broom::tidy(stats::anova(model))$p.value[1]\n  \n  # Extract eta²\n  eta &lt;- effectsize::eta_squared(model, partial = FALSE)$Eta2[1]\n  \n  tibble(variable = var, p_value = pval, eta_squared = eta)\n}) |&gt; bind_rows()\n\nresults |&gt;\n  gt() |&gt;\n  tab_header(title = \"ANOVA results: Clarity vs numeric variables\") |&gt;\n  fmt_number(columns = c(p_value, eta_squared), decimals = 4) |&gt;\n  tab_options(table.align = \"left\")\n\n\n\n\n\n\n\nANOVA results: Clarity vs numeric variables\n\n\nvariable\np_value\neta_squared\n\n\n\n\ncarat\n0.0000\n0.1372\n\n\ndepth\n0.0000\n0.0101\n\n\ntable\n0.0000\n0.0262\n\n\nprice\n0.0000\n0.0272\n\n\n\n\n\n\n\nAs a result of the above, it was concluded that clarity is most dependent on carat and cut. Therefore, a new characteristic based on these two characteristics should be created.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#removing-outliers---dbscan",
+    "href": "wl-fe.html#removing-outliers---dbscan",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "4. Removing outliers - DBSCAN",
+    "text": "4. Removing outliers - DBSCAN\nBefore creating a new feature, the dataset must be cleared of outliers. The DBSCAN method will be used.\nFirst, numeric columns are separated from categorical ones.\n\ndiamonds_n &lt;- diamonds %&gt;%\n  select(where(is.numeric))\n\n\ndiamonds_non_numeric &lt;- diamonds %&gt;%\n  select(where(~ !is.numeric(.)))\n\nThe next step is to divide the data into clusters.\n\ndiamonds_dbscan &lt;- dbscan(select(diamonds, where(is.numeric)), eps = 4, minPts = 6)\n\ndiamonds_clustered &lt;- diamonds_n %&gt;%\n  mutate(cluster = diamonds_dbscan$cluster)\n\nThe numerical data with the added cluster number are then combined with the categorical data.\n\ndiamonds_clustered &lt;- bind_cols(diamonds_clustered, diamonds_non_numeric)\n\nNext, the rows where the cluster value is not zero are filtered. Rows with a cluster value of zero are considered outliers.\n\ndiamonds_no_outlier &lt;- diamonds_clustered %&gt;%\n  filter(cluster != 0) %&gt;%\n  select(-cluster)",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#feature-engineering-for-the-clarity-column",
+    "href": "wl-fe.html#feature-engineering-for-the-clarity-column",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "5. Feature engineering for the clarity column",
+    "text": "5. Feature engineering for the clarity column\nThe next step is to create a new feature.\nFirst, we group by a clarity-dependent categorical column—cut.\nWe then assign an average diamond weight to each row depending on the cut group.\nFinally, a target categorical feature is created that groups the previously obtained mean.\n\ndiamonds_fe &lt;- diamonds_no_outlier %&gt;%\n  group_by(cut) %&gt;%\n  mutate(mean_carat_by_cut = mean(carat)) %&gt;%\n  ungroup() %&gt;% \n  mutate(\n    carat_by_cut_group = factor(ntile(mean_carat_by_cut, 4))\n  )\n\nNow we need to evaluate the new feature - whether it differs for different clarity levels.\n\ndiamonds_fe_for_display &lt;- diamonds_fe %&gt;%\n  group_by(clarity,carat_by_cut_group) %&gt;%\n  summarise(number_of = n())\n\nOnce grouped and counted, you can draw a tile chart showing how many diamonds of a given clarity grade there are in the newly created column.\n\nggplot(diamonds_fe_for_display, aes(x = clarity, y = carat_by_cut_group, fill = number_of))+\n  geom_tile()+\n  labs(\n    title = \"Clarity - Group of carat - cut relation\",\n    subtitle = \"FE new column carat_by_cut_group - clarity relation\"\n  )\n\n\n\n\n\n\n\n\nIt’s clear that diamonds in some clarity categories have different values for each new column value, which can help with predictions. However, these differences aren’t significant, which isn’t surprising, as the correlation test results didn’t yield significant values.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#comparison-of-the-base-model-and-the-feature-engineering-model",
+    "href": "wl-fe.html#comparison-of-the-base-model-and-the-feature-engineering-model",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "6. Comparison of the base model and the feature engineering model",
+    "text": "6. Comparison of the base model and the feature engineering model\nFirst, the model will be tested with basic data - without feature engineering.\n\nresults_baseline &lt;- train_and_evaluate_xgb(diamonds_no_outlier)\n\nA dataset is prepared with a new categorical column created by feature engineering.\n\ndf_fe_carat_cut &lt;- diamonds_fe %&gt;% \n  select(names(diamonds), carat_by_cut_group) \n\nThe model is then trained and evaluated with the new feature.\n\nresults_fe_carat_cut &lt;- train_and_evaluate_xgb(df_fe_carat_cut)\n\nA summary frame is then created containing the F1 metric.\n\nsummary_df &lt;- tibble(\n  Model = c(\n    \"1. Base model - no FE\",\n    \"2. FE: Carat\"\n  ),\n  F1_Score = c(\n    results_baseline$f1_score$.estimate,\n    results_fe_carat_cut$f1_score$.estimate\n  )\n) %&gt;%\n  arrange(desc(F1_Score))\n\nIn order to efficiently display a frame with F1 points, the gt package will be used.\n\nsummary_df %&gt;%\n  gt() %&gt;%\n  tab_header(\n    title = \"Comparassion of models -  XGBoost\"\n  ) %&gt;%\n  fmt_number(\n    columns = F1_Score,\n    decimals = 3\n  )  %&gt;%\n  tab_options(table.align = \"left\")\n\n\n\n\n\n\n\nComparassion of models - XGBoost\n\n\nModel\nF1_Score\n\n\n\n\n2. FE: Carat\n0.299\n\n\n1. Base model - no FE\n0.253\n\n\n\n\n\n\n\nTo graphically compare models with and without feature engineering based on F1 scores, a column chart will be displayed.\n\nggplot(summary_df, aes(x = reorder(Model, F1_Score), y = F1_Score, fill = Model)) +\n  geom_col(show.legend = FALSE, width = 0.6) +\n  coord_flip() +\ngeom_text(aes(label = round(F1_Score, 3)), hjust = 1.5)+\n  labs(title = \"Summary of F1 Score for XGBoost models\",\n       x = \"\", y = \"F1 Score\") +\n  theme_minimal()\n\n\n\n\n\n\n\n\nThe next step is to display the confusion matrix for the results from the model without feature engineering\n\nautoplot(results_baseline$confusion_matrix, type = \"heatmap\") +\n  labs(title = \"Conf. matrix - base model\")\n\n\n\n\n\n\n\n\nAnd also the confusion matrix for the model in which feature engineering was applied.\n\nautoplot(results_fe_carat_cut$confusion_matrix, type = \"heatmap\") +\n  labs(title = \"Conf. matrix - FE: Carat\")",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "wl-fe.html#summary",
+    "href": "wl-fe.html#summary",
+    "title": "Feature engineering for the XGBoost model using Cramér’s V and Eta Square tests",
+    "section": "7. Summary",
+    "text": "7. Summary\nThe results of the C-V and Eta-squared statistical tests clearly indicated that there were relationships between clarity and diamond cut and weight, but these relationships were moderate—around ten percent—a significant increase, ranging from a few to several dozen percent, could not be expected. However, for many models, such an increase is significant.\nThe resulting increase may have significant practical significance. Although the model is often incorrect, based on the conf. matrix, it can be easily concluded that the obtained diamond clarity grades are often close to the actual grade—the error is often not significant.\nThe resulting model may have some practical significance. In the case of a batch of goods already in stock, where there is no information about the price of individual diamonds and their purity, their purity can be estimated with a certain degree of probability using the model, which yields significantly better results than random guessing, which can help organize the diamonds stored in stock.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "FE for the XGBoost model using Cramér's V and Eta Square tests"
+    ]
+  },
+  {
+    "objectID": "vip_end.html",
+    "href": "vip_end.html",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "",
+    "text": "Each model has a certain complexity, and the complexity of an ML model increases with the number of input features. In production systems, reducing model complexity is a critical task, as the massive workload of model training or prediction means that reducing the number of features—retaining the most important ones—results in resource savings.\nThe vip::vip function can be used to determine the importance of model input features. It allows you to plot a graph showing which features are most important for the model, and its results can be verified experimentally or indirectly using statistical tests from the effectsize package, such as Eta Squared.\nTo simplify development, the model will not undergo detailed evaluation such as ROC, outlier removal, and several other steps typical of ML model development will not be performed.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "vip_end.html#introduction",
+    "href": "vip_end.html#introduction",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "",
+    "text": "Each model has a certain complexity, and the complexity of an ML model increases with the number of input features. In production systems, reducing model complexity is a critical task, as the massive workload of model training or prediction means that reducing the number of features—retaining the most important ones—results in resource savings.\nThe vip::vip function can be used to determine the importance of model input features. It allows you to plot a graph showing which features are most important for the model, and its results can be verified experimentally or indirectly using statistical tests from the effectsize package, such as Eta Squared.\nTo simplify development, the model will not undergo detailed evaluation such as ROC, outlier removal, and several other steps typical of ML model development will not be performed.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "vip_end.html#loading-libraries-and-data",
+    "href": "vip_end.html#loading-libraries-and-data",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "1. Loading libraries and data",
+    "text": "1. Loading libraries and data\n\nlibrary(ggplot2)   \nlibrary(plotly)    \nlibrary(dplyr)       \nlibrary(tidymodels)   \nlibrary(DT)            \nlibrary(tictoc)      \nlibrary(vip)          \nlibrary(effectsize)   \n\n\ndata(\"diamonds\")\n\n\ndiamonds_df &lt;- diamonds\n\nA short look at the histogram of the predicted value (cut) of the model being built will be performed.\n\nplot_ly(\n  data = diamonds_df,\n  x = ~cut\n) %&gt;%\n  add_histogram() %&gt;%\n  layout(\n    title = \"Histogram of cut\"\n  )\n\n\n\n\n\nThere is clearly a class imbalance, so the Cohen’s Kappa parameter, which is robust to class imbalance, should be used in the model evaluation.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "vip_end.html#dividing-data",
+    "href": "vip_end.html#dividing-data",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "2. Dividing data",
+    "text": "2. Dividing data\nFirst, the data is divided into training and test sets.\n\ndiamonds_split &lt;- initial_split(diamonds_df, strata = cut)\n\ndiamonds_training &lt;- training(diamonds_split)\n\ndiamonds_testing &lt;- testing(diamonds_split)",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "vip_end.html#preprocessing-of-data",
+    "href": "vip_end.html#preprocessing-of-data",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "3. Preprocessing of data",
+    "text": "3. Preprocessing of data\nThe data recipe is then prepared and can then be implemented using prep and bake.\n\nsome_recipe &lt;- recipe(cut ~., data = diamonds_df) %&gt;%\n  step_corr(all_numeric_predictors()) %&gt;%\n  step_normalize(all_numeric_predictors()) %&gt;%\n  step_dummy(all_nominal_predictors(), one_hot = TRUE) \n\nA prep instance is then created that can be used for training and test data for final data transformation.\n\nsome_recipe_prepared &lt;- prep(some_recipe, training = diamonds_testing) \n\ntesting_processed &lt;- some_recipe_prepared %&gt;%\n  bake(new_data = NULL)\n\ntraining_processed &lt;- some_recipe_prepared %&gt;%\n  bake(new_data = diamonds_training)",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "vip_end.html#model-instance-amd-predictions",
+    "href": "vip_end.html#model-instance-amd-predictions",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "4. Model instance amd predictions",
+    "text": "4. Model instance amd predictions\nNext, an instance of the random forest model is created. Randomly selected hyperparameters (but with typical values) are supplemented with an importance parameter, impurity, which defines how feature importance is calculated by averaging the reduction in impurity across nodes.\n\nrf_model &lt;- rand_forest(trees = 100, mtry = 12) %&gt;%\n  set_engine(\"ranger\", importance = \"impurity\") %&gt;%\n  set_mode(\"classification\")\n\n\n4.1. Model fitting\nThe model will then be trained and its duration will be recorded.\n\ntic(\"RF\")\nfitted_model &lt;- fit(rf_model, cut ~., data = training_processed)\ntoc_result &lt;- toc()\n\nRF: 9.61 sec elapsed\n\n\n\nfitting_time &lt;- toc_result$toc - toc_result$tic\n\nThe time taken to complete the training.\n\nfitting_time\n\nelapsed \n   9.61 \n\n\n\n\n4.2. Predictions\nTo make a prediction, the predict function will be used on the already trained model.\n\npredictions &lt;- predict(fitted_model, new_data = testing_processed)\n\nThe prediction results will be collected in a tibble to facilitate their later visualization.\n\nchecking_class_df &lt;- testing_processed %&gt;%\n  select(cut) %&gt;%\n  mutate(\n    predictions = predictions$.pred_class\n  )\n\nThen, using the metrics function from the yardstick. package, a data frame with accuracy and kappa metrics is obtained.\n\nmetrics_results &lt;- checking_class_df %&gt;%\n  metrics(truth = cut, estimate = predictions)\n\nThe received metrics are displayed using the appropriate function from the DT package.\n\ndatatable(metrics_results)\n\n\n\n\n\nIt is clearly visible that the Kappa coefficient is slightly lower than Accuracy, which means that the model may have difficulty predicting less frequently occurring classes.\nThe next step is to display the confusion matrix, and the coefficient values of this matrix will be calculated using the conf_mat function.\n\nconf_mat_result &lt;- conf_mat(checking_class_df, truth = cut, estimate = predictions)\n\n\nautoplot(conf_mat_result, type = \"heatmap\")\n\n\n\n\n\n\n\n\nIt is clear that the predictions are grouped around the diagonal, which is a good sign, but there is a significant imbalance in the number of classes.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "vip_end.html#assessment-of-the-importance-of-individual-features-for-the-model",
+    "href": "vip_end.html#assessment-of-the-importance-of-individual-features-for-the-model",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "5. Assessment of the importance of individual features for the model",
+    "text": "5. Assessment of the importance of individual features for the model\nUsing the vip::vip function, the importance of individual entries will be calculated and displayed as a graph.\n\nvip(fitted_model$fit)\n\n\n\n\n\n\n\n\nIt is clear that the most important features for the model to predict cut to table and depth are: These and other features will be subjected to statistical tests to assess whether statistical methods confirm the significant impact of these features on cut.\nThe next step is to compare the results with the Eta Squared test from the effectsize package. While the ANOVA test (aov) allows for assessing whether the numerical column influences the categorical column, it does not provide a measure of this influence—how significant it is. The Eta Squared test is used for this purpose.\nDue to the negligible effect of other categorical variables on the model result, tests such as chi-square will not be conducted to assess the effect of other categorical columns on the cut column.\nFirst, an empty tibble is created, which will later be filled with data.\n\neffects &lt;-tibble(\n  parameter = character(),\n  impact = numeric()\n)\n\nThen, calculations will be performed in a loop on the numerical columns, allowing the assessment of the influence of a given column on the cut.\n\ndiamonds_df_numeric &lt;- diamonds_df %&gt;%\n  select(where(is.numeric))\n\n\nfor(column in colnames(diamonds_df_numeric))\n{\n  t_compare &lt;- diamonds_df[[column]]\n  aov_result &lt;- aov(t_compare ~ diamonds_df$cut)\n  effect_size_result &lt;- effectsize::eta_squared(aov_result)\n  tempolary_tibble &lt;- tibble(\n    parameter = column,\n    impact = effect_size_result$Eta2\n  )\n  \n  effects &lt;- effects %&gt;%\n    bind_rows(tempolary_tibble)\n}\n\nThe cut impact data is then sorted.\n\neffects &lt;- effects %&gt;%\n  arrange(impact)\n\nCut impact data is being prepared for display.\n\neffects &lt;- effects %&gt;%\n  mutate(parameter = reorder(parameter, rev(impact)))\n\nThe data is then displayed using the DT package.\n\ndatatable(effects)\n\n\n\n\n\nThe data displayed in the table confirms what the graph from the vip::vip function showed. The test results will also be displayed using a bar chart.\n\nplot_ly(\n  data = effects,\n  x = ~parameter,\n  y = ~impact\n) %&gt;%\n  add_bars() %&gt;%\n  layout(\n    title = \"The influence of input parameters on the cut - Eta Squared result\"\n  )\n\n\n\n\n\nIt is clearly visible that the bar chart confirms the observations obtained from the vip:vip function - table and depth have the greatest impact on cut.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "vip_end.html#comparassion-of-model-only-with-important-features",
+    "href": "vip_end.html#comparassion-of-model-only-with-important-features",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "6. Comparassion of model only with important features",
+    "text": "6. Comparassion of model only with important features\nFollowing the same procedure as for the full-feature model, a model with the most important features will be created for comparison to the full-feature model. First, the relevant features must be selected.\n\ndiamonds_df_if &lt;- diamonds %&gt;% select(cut, table, depth)\n\nThen, following the same procedure, a table of Cohen’s Kappa and Accuracy results for the model will be obtained.\nThe received metrics are displayed using the appropriate function from the DT package.\n\n\n\n\n\n\nThen, the obtained metrics should be compared with the metrics of the model with all features.\nThen both metric tables are joined using left_join\n\nmetrics_combined &lt;- metrics_results %&gt;%\n  rename(estimate_original = .estimate) %&gt;%\n  left_join(\n    metrics_results_if %&gt;%\n      rename(estimate_if = .estimate),\n    by = c(\".metric\", \".estimator\")\n  ) %&gt;% select(-.estimator)\n\nThen the data format is converted to long.\n\nmetrics_combined_longer &lt;- metrics_combined %&gt;% pivot_longer(cols = starts_with(\"estimate\"),\n               names_to = \"estimation_type\",\n               values_to = \"value\")\n\nTo avoid visualization problems, character types are converted to factor.\n\nmetrics_combined_wider_typed &lt;- metrics_combined_longer %&gt;%\n  mutate(\n    estimation_type = factor(estimation_type),\n    .metric = factor(.metric)\n  )\n\nFinally, the results can be visualized using the plotly package.\n\nplot_ly(\n  data = metrics_combined_wider_typed,\n  x = ~estimation_type,\n  y = ~.metric,\n  z = ~value\n) %&gt;%\n  add_heatmap() %&gt;%\n  layout(\n    title = \"Comparassion of metrics in model\",\n    xaxis = list(title = \"Model type\"),\n    yaxis = list(title = \"Metric\")\n  )\n\n\n\n\n\nIt is clearly visible that the metrics in both models do not differ much from each other.\nThe next step is to compare the model training time with all features and only with the most important features.\n\nfitting_time_tb &lt;- tibble(\ntime = c(fitting_time, fitting_time_if),\nmodel = c(\"All features model\", \"Most important features model\")\n)\n\n\nplot_ly(\n  data = fitting_time_tb,\n  x = ~model,\n  y= ~time\n) %&gt;%\n  add_bars() %&gt;%\n  layout(\n    title = \"Comparison of models with all features and only the most important features\"\n  )\n\n\n\n\n\nIt is clearly visible that the simplified model has a much shorter training time than the one with all features.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "vip_end.html#summary",
+    "href": "vip_end.html#summary",
+    "title": "Determining feature importance using the vip::vip function",
+    "section": "7. Summary",
+    "text": "7. Summary\nThe obtained data clearly indicate that the most important features for the cut prediction model are table and depth.\nThis is confirmed by the graph of the vip::vip function and the results of the Eta Squared test.\nIt should be emphasized that for subsequent positions, discrepancies appear – vip::vip indicates price as the third most important feature, while Eta Squared indicates carat.\nThe described method can be used to reduce the model’s dimensions by removing the least important features to simplify training or prediction. In the described case, these would be categorical columns other than cut, as well as columns related to diamond dimensions – x, y, and z.\nThe most important finding is that the experiment with removing irrelevant columns from the data resulted in significantly shorter training times and only slightly lower performance. This supports the idea that less relevant model entries can be removed to improve performance with very little degradation in model efficiency.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "Determining feature importance using the vip::vip function"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html",
+    "href": "wl-clustering-infer-2.html",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "",
+    "text": "A common problem in jewelry stores is the division of diamonds into price categories, so that the number of shelves for each category can be optimally selected, as well as the shelf design to facilitate the presentation of diamonds in a given category - so that the diamond colors dominant in a given category look their best.\n\n\nThis paper will describe the clustering problem using the example of dividing a diamond dataset into four logical parts.\nSimply assigning a cluster to a row doesn’t really add anything. However, if a relationship between the cluster and other columns is discovered, the cluster to which the row belongs provides some information. To obtain information about the relationship between the cluster and existing columns, statistical methods—primarily hypothesis testing—can be used.\nTherefore, a clustering of the diamond set will be carried out and then the relationships between:\n\ndiamond depth and price (unrelated to the cluster, but intended to demonstrate the infer package methodology)\ncluster and diamond price (based on F-statistics)\ncluster and diamond color (based on chi-square statistic)\n\nFinally, conclusions will be presented.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#introduction",
+    "href": "wl-clustering-infer-2.html#introduction",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "",
+    "text": "A common problem in jewelry stores is the division of diamonds into price categories, so that the number of shelves for each category can be optimally selected, as well as the shelf design to facilitate the presentation of diamonds in a given category - so that the diamond colors dominant in a given category look their best.\n\n\nThis paper will describe the clustering problem using the example of dividing a diamond dataset into four logical parts.\nSimply assigning a cluster to a row doesn’t really add anything. However, if a relationship between the cluster and other columns is discovered, the cluster to which the row belongs provides some information. To obtain information about the relationship between the cluster and existing columns, statistical methods—primarily hypothesis testing—can be used.\nTherefore, a clustering of the diamond set will be carried out and then the relationships between:\n\ndiamond depth and price (unrelated to the cluster, but intended to demonstrate the infer package methodology)\ncluster and diamond price (based on F-statistics)\ncluster and diamond color (based on chi-square statistic)\n\nFinally, conclusions will be presented.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#loading-libraries",
+    "href": "wl-clustering-infer-2.html#loading-libraries",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Loading libraries",
+    "text": "Loading libraries\nThe first step is to load the appropriate libraries\n\nlibrary(tidyclust)\nlibrary(dplyr)\nlibrary(tidymodels)\nlibrary(ggplot2)\nlibrary(DT)\nlibrary(infer)\nlibrary(clustMixType)\nlibrary(tidyr)\nlibrary(corrplot)\nlibrary(RColorBrewer)\nlibrary(viridis)",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#loading-a-data",
+    "href": "wl-clustering-infer-2.html#loading-a-data",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Loading a data",
+    "text": "Loading a data\nThe diamond dataset is being loaded\n\ndata(\"diamonds\")\n\n\ndatatable(head(diamonds, caption = \"First few rows of diamonds dataset\"))",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#using-the-elbow-method-to-determine-the-number-of-clusters",
+    "href": "wl-clustering-infer-2.html#using-the-elbow-method-to-determine-the-number-of-clusters",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Using the elbow method to determine the number of clusters",
+    "text": "Using the elbow method to determine the number of clusters\nFirst of all, the data is standardized\n\ndiamonds_for_elbow &lt;- diamonds %&gt;% \n  select(where(is.numeric)) %&gt;% \n  scale() \n\nA statistical summary data frame is then created with the number of clusters ranging from one to ten.\n\nk_grid &lt;- tibble(k = 1:10) %&gt;%\n  mutate(\n    kclust = map(k, ~kmeans(diamonds_for_elbow, centers = .x, nstart = 25)),\n    glanced = map(kclust, glance)\n  )\n\nNext, we unpack the contents of the individual statistical summaries\n\nk_summary &lt;- k_grid %&gt;%\n  unnest(glanced)\n\nFinally, one can draw a graph of the dependence of the cluster on the within-cluster sum of squares, which determines the coherence of the cluster - the closer they lie to the centroids, the smaller this distance.\n\nlibrary(RColorBrewer)\nggplot(k_summary, aes(x = k, y = tot.withinss)) +\n  geom_line(color = brewer.pal(3, \"Set2\")[1], linewidth = 1.2) +\n  geom_point(size = 4, color = brewer.pal(3, \"Set2\")[1]) +\n  geom_vline(xintercept = 4, linetype = \"dashed\", color = \"red\", linewidth = 1) +\n  annotate(\"text\", x = 4.5, y = max(k_summary$tot.withinss) * 0.9, \n           label = \"Optimal k=4\", color = \"red\", hjust = 0) +\n  labs(\n    title = \"Elbow Method for Optimal Number of Clusters\",\n    subtitle = \"Lower WCSS indicates more cohesive clusters\",\n    x = \"Number of Clusters (k)\",\n    y = \"Total Within-Cluster Sum of Squares (WCSS)\",\n    caption = \"Source: Diamonds dataset analysis\"\n  ) +\n  scale_x_continuous(breaks = 1:10) +\n  theme_minimal(base_size = 12) +\n  theme(\n    plot.title = element_text(face = \"bold\", size = 14),\n    plot.subtitle = element_text(size = 10, color = \"grey50\"),\n    panel.grid.major = element_line(color = \"grey80\"),\n    panel.grid.minor = element_blank()\n  )\n\n\n\n\n\n\n\n\nBased on the graph, the number of clusters equal to four can be assumed as optimal.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#filtering-a-data---domain-knowledge",
+    "href": "wl-clustering-infer-2.html#filtering-a-data---domain-knowledge",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Filtering a data - domain knowledge",
+    "text": "Filtering a data - domain knowledge\nDue to the relationship between the mass of a diamond and its size, the columns of sizes are removed and the column of diamond mass is left.\n\ndiamonds_num &lt;- diamonds %&gt;% select(-x, -y, -z)",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#data-preprocessing",
+    "href": "wl-clustering-infer-2.html#data-preprocessing",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Data preprocessing",
+    "text": "Data preprocessing\nThis section will present the process of preparing data for the model not based on domain knowledge, but on transformations and calculations.\n\nRemoving correlated columns\nMultiple columns with high correlations duplicate information fed into the model, which creates confusion and makes training more difficult. Therefore, correlated columns in the data should be removed, leaving only the first correlated column.\n\ncorrelation_matrix &lt;- diamonds_num %&gt;%\n  select(where(is.numeric)) %&gt;%\n  cor(method = \"pearson\")\n\nThen it is easy to display the resulting visualization\n\ncorrplot(correlation_matrix,\n         method = \"color\",\n         col = brewer.pal(n = 10, name = \"RdBu\"), # Kontrastowa paleta\n         addCoef.col = \"black\",\n         tl.col = \"black\",\n         tl.srt = 45,\n         tl.cex = 1.1, # Większe etykiety\n         number.cex = 0.8, # Rozmiar współczynników\n         title = \"Correlation Matrix of Numeric Features in Diamonds Dataset\",\n         mar = c(0, 0, 2, 0) # Margines na tytuł\n)\n\n\n\n\n\n\n\n\nBased on the above chart, the carat column is removed, which duplicates the information from the price column\n\ndiamonds_num &lt;- diamonds %&gt;% select(-carat)\n\n\n\nData standardization\nThe second step is to standardize the numerical data. To do this, we’ll create a recipe that allows us to obtain a data frame with standardized numerical data.\n\nscaled_numeric_columns &lt;- recipe(~., data = diamonds_num) %&gt;%\n  step_rm(all_nominal()) %&gt;% \n  step_normalize(all_numeric()) %&gt;%\n  prep() %&gt;%\n  bake(new_data = NULL)\n\nThen we replace the previous numeric columns with the new ones\n\ndiamonds_num &lt;- diamonds_num %&gt;%\n  select(-where(is.numeric)) %&gt;%\n  bind_cols(scaled_numeric_columns)\n\nAfter transformations, the data looks like below\n\ndatatable(head(diamonds, caption = \"First few rows of diamonds dataset - ready for k_prototypes\"))",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#model-of-clustering",
+    "href": "wl-clustering-infer-2.html#model-of-clustering",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Model of clustering",
+    "text": "Model of clustering\nDiamonds dataset will divided into four subsets - clusters - this is topic of that section\nAt first - model to do clustering is instancied\nThe model that will perform clustering was selected. The k-means function was chosen as the model’s “interface,” but due to the presence of both categorical and numerical data, the clustMixType model was chosen.\n\nmodel &lt;- k_means(num_clusters = 4) %&gt;%\n  set_engine(\"clustMixType\")",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#model---fit",
+    "href": "wl-clustering-infer-2.html#model---fit",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Model - fit",
+    "text": "Model - fit\nThe model is trained on all available data\n\nfitted_model &lt;- fit(model, ~ ., data = diamonds_num)",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#prediction-using-fitted-model",
+    "href": "wl-clustering-infer-2.html#prediction-using-fitted-model",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Prediction using fitted model",
+    "text": "Prediction using fitted model\nAppending a cluster column to existing columns\n\naugmented_data &lt;- augment(fitted_model, new_data = diamonds_num)\n\nHead of new dataset\n\ndatatable(head(augmented_data, caption = \"First few rows of augmented_data\"))\n\n\n\n\n\nIt is clearly visible that the column with the cluster designation has been added correctly.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#hypotesis-testing",
+    "href": "wl-clustering-infer-2.html#hypotesis-testing",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Hypotesis testing",
+    "text": "Hypotesis testing\nThis section will test three hypotheses: the first concerns numerical variables and aims to demonstrate the infer package’s operation using an intuitive correlation example. The other two will be based on more advanced statistics: F and chi-square.\n\nCorrelation of depth and price (demonstration of the infer methodology)\nTo understand the infer methodology, an example will be presented to determine the relationship between depth and price of a diamond.\nInitially, the Pearson statistic is calculated for the actual data distribution\n\nobs_corr &lt;- augmented_data %&gt;%\n  specify(depth ~ price) %&gt;%      \n  calculate(stat = \"correlation\") \n\nThen the statistic is calculated 2000 times (the value generally accepted in the literature) - for the distribution with swapped values of depth and diamond price. We put forward the null hypothesis - no relationship between depth and diamond price.\nThe null hypothesis (H0) is formed - there is no relationship between depth and diamond price. Hypothesis H1 says the opposite.\n\nnull_corr &lt;- augmented_data %&gt;%\n  specify(depth ~ price) %&gt;%      \n  hypothesize(null = \"independence\") %&gt;%  # H0: brak związku\n  generate(reps = 2000, type = \"permute\") %&gt;%\n  calculate(stat = \"correlation\")   \n\nThe null hypothesis assumed no relationship between depth and diamond price. We calculated the probability that the calculated Pearson statistic value would be obtained in the absence of a relationship.\n\np_val_corr &lt;- get_p_value(null_corr, obs_corr, direction = \"greater\")\np_val_corr \n\n# A tibble: 1 × 1\n  p_value\n    &lt;dbl&gt;\n1   0.995\n\n\nThe value of the statistic is marked on the null distribution graph - if it is outside the range, we reject the null hypothesis.\n\nvisualize(null_corr) +\n  shade_p_value(obs_corr, direction = \"greater\") +\n  labs(\n    title = paste(\"Null distr., Pearson correlation statistic =\", ... =    round(obs_corr$stat[1],2))\n  )\n\n\n\n\n\n\n\n\nBased on the above results, we accept the null hypothesis - there is a NO relationship between the depth of the diamond and its price\n\n\nRelationship between assigned cluster and price\nThe purpose of this section is to determine whether a relationship exists between the assigned cluster and the price of a diamond. As in the previous example, the null distribution statistic and the value are calculated. Because we are determining a relationship between a categorical (cluster) and a numerical data item, the F statistic will be used.\n\nobs_f &lt;- augmented_data %&gt;%\n  specify(price ~ .pred_cluster) %&gt;%    \n  calculate(stat = \"F\")   \n\nAs before, the hypothesis of no relationship is put forward. Hypothesis H1 says the opposite - there is a relationship price - cluster.\n\nnull_f &lt;- augmented_data %&gt;%\n  specify(price ~ .pred_cluster) %&gt;%  \n  hypothesize(null = \"independence\") %&gt;%\n  generate(reps = 2000, type = \"permute\") %&gt;%\n  calculate(stat = \"F\")  \n\nThe meaning of p is analogous to the previous one, but it concerns the relationship between cluster and price\n\np_val_f &lt;- get_p_value(null_f, obs_f, direction = \"greater\")\n\nWarning: Please be cautious in reporting a p-value of 0. This result is an approximation\nbased on the number of `reps` chosen in the `generate()` step.\nℹ See `get_p_value()` (`?infer::get_p_value()`) for more information.\n\np_val_f \n\n# A tibble: 1 × 1\n  p_value\n    &lt;dbl&gt;\n1       0\n\n\nVisualization of the null distribution graph\n\nvisualize(null_f) +\n  xlim(0, 5)+\n  shade_p_value(obs_f, direction = \"greater\") +\n  labs(\n    title = paste(\"Null distr., F statistic =\", round(obs_f$stat[1],2))\n  )\n\n\n\n\n\n\n\n\nBased on the data obtained above, the null hypothesis is rejected - there is a relationship between the price of a diamond and the assigned cluster.\n\nVerification of the adopted hypothesis\nTo verify the hypothesis, a graph will be prepared illustrating the relationship between clusters, the number of available diamonds, and average prices. If individual clusters exhibit a common trend in the number of available diamonds, this indicates that they may differ in price – the fewer diamonds of a given type/cluster, the more expensive they should be. This relationship will then be visualized directly.\nFirst, the quantity-cluster relationship will be illustrated.\n\nggplot(augmented_data, aes(x = .pred_cluster, fill = .pred_cluster)) +\n  geom_bar() +\n  geom_text(aes(label = ..count..), stat = \"count\", vjust = -0.3, size = 4) +\n  scale_fill_viridis_d(option = \"C\", begin = 0.2, end = 0.8) +\n  labs(\n    title = \"Distribution of Diamonds Across Clusters\",\n    subtitle = \"Each bar represents the number of diamonds in a cluster\",\n    x = \"Cluster\",\n    y = \"Count of Diamonds\",\n    caption = \"Source: Diamonds dataset analysis\"\n  ) +\n  theme_minimal(base_size = 12) +\n  theme(\n    plot.title = element_text(face = \"bold\", size = 14),\n    plot.subtitle = element_text(size = 10, color = \"grey50\"),\n    legend.position = \"none\" # Usunięcie legendy, bo kolory nie są kluczowe\n  )\n\n\n\n\n\n\n\n\nThen, in order to directly evaluate the average price in a given category, we transform the data through grouping and aggregation.\n\naugmented_data_denorm_price &lt;- augmented_data %&gt;%\n  mutate(price = diamonds$price)\n\n\naugmented_data_summary_price &lt;- augmented_data_denorm_price %&gt;%\n  select(price, .pred_cluster) %&gt;%\n  group_by(.pred_cluster) %&gt;%\n  summarise(across(where(is.numeric), median),\n            count = n())\n\nPlot of relations of price - cluster - count of diamonds in cluster\n\nggplot(augmented_data_summary_price, aes(x = .pred_cluster, y = count, fill = price)) +\n  geom_col() +  \n  geom_text(aes(label = paste(\"Median price\",round(price, 0))), vjust = -0.5, size = 3.5) +\n  scale_fill_gradient(low = \"lightgreen\", high = \"darkgreen\") +\n  labs(title = \"Heatmap of price and count of\",\n       subtitle = \"High of each bar represents the number of diamonds in a cluster\",\n       x = \"Cluster\",\n       y = \"Count of diamonds\", \n       fill = \"Median price\",\n       caption = \"Source: Diamonds dataset analysis\") +\n  theme_minimal() +\n  scale_y_continuous(labels = scales::comma) \n\n\n\n\n\n\n\n\nThe analysis of the above graphs allows us to confirm the adopted hypothesis (H1 - there is a relation) about the relationship between the assigned cluster and the diamond price. However, when analyzing both charts above, some unspecified factor - apart from price - influences the division of clusters.\n\n\n\nRelationship between assigned cluster and color\nTo determine the relationship between cluster and color, the chi-square statistic will be calculated - as the relationship between categorical values is assessed.\nThe procedure is similar to the previous one.\n\nobs_chisq &lt;- augmented_data %&gt;%\n  specify(color ~ .pred_cluster) %&gt;%      \n  calculate(stat = \"chisq\")    \n\nAs before - the null hypothesis says that there is no relationship between cluster and price\n\nnull_chisq &lt;- augmented_data %&gt;%\n  specify(color ~ .pred_cluster) %&gt;%\n  hypothesize(null = \"independence\") %&gt;%  \n  generate(reps = 2000, type = \"permute\") %&gt;%\n  calculate(stat = \"chisq\")\n\nSimilarly to the previous example, the p value is calculated\n\np_val_chisq &lt;- get_p_value(null_chisq, obs_chisq, direction = \"greater\")\n\nWarning: Please be cautious in reporting a p-value of 0. This result is an approximation\nbased on the number of `reps` chosen in the `generate()` step.\nℹ See `get_p_value()` (`?infer::get_p_value()`) for more information.\n\np_val_chisq\n\n# A tibble: 1 × 1\n  p_value\n    &lt;dbl&gt;\n1       0\n\n\n\nvisualize(null_chisq) +\n  xlim(0, 100)+\n  labs(\n    title = paste(\"Null distr., chi-sq statistic =\", round(obs_chisq$stat[1],2))\n  )\n\n\n\n\n\n\n\n\nBased on the data obtained above, the null hypothesis is rejected - there is relationship between the color of a diamond and the assigned cluster.\n\nVerification of the adopted hypothesis\nAs in the previous hypothesis, graphs are created to assess the correctness of the adopted hypothesis.\nFirst, you need to group the data by the color of the diamond and perform aggregation - the sum of occurrences\n\naugmented_data_for_color &lt;- augmented_data %&gt;%\n  group_by(color) %&gt;%\n  summarise(count_of_color= n())\n\nThen we draw a graph of the number of diamonds of a given color in the entire set, without dividing them into clusters.\n\nggplot(augmented_data_for_color, aes(x = color, y = count_of_color, fill = color)) +\n  stat_summary(fun = sum, geom = \"bar\") +\n  labs(x = \"Color\", y = \"Total count\", title = \"Distribution of colors in the whole dataset\",\n      subtitle = \"Individual colors - number of occurrences\",\n      caption = \"Diamond dataset after color-quantity aggregation\") +\n  theme_minimal()\n\n\n\n\n\n\n\n\nNext, you should examine the proportion of diamonds in each cluster. By comparing the proportions with the previously obtained bar chart, you can assess how closely the color proportions in each cluster compare to the overall set.\nFirst, it is necessary to group the data appropriately\n\ndiamonds_cluster_color &lt;- augmented_data %&gt;%\n  group_by(.pred_cluster, color) %&gt;%\n  summarise(count_of_color = n(), .groups = \"drop\") %&gt;%\n  group_by(.pred_cluster) %&gt;%\n  mutate(percentage = count_of_color / sum(count_of_color) * 100) %&gt;%\n  select(-count_of_color)\n\nOnce you have grouped your data, you can easily draw the appropriate graph.\n\nggplot(diamonds_cluster_color, aes(x = color, y = .pred_cluster, fill = percentage)) +\n  geom_tile(color = \"white\", linewidth = 0.5) +\n  geom_text(\n    aes(\n      label = sprintf(\"%.1f%%\", percentage),\n      color = ifelse(percentage &gt; 18, \"white\", \"black\") \n    ), \n    size = 4\n  ) +\n  scale_color_identity() +\n  scale_fill_viridis_c(option = \"inferno\", direction = -1) +\n  labs(\n    title = \"Distribution of Diamond Colors Across Clusters\",\n    subtitle = \"Percentage of each color within clusters\",\n    x = \"Diamond Color\",\n    y = \"Cluster\",\n    fill = \"Percentage (%)\",\n    caption = \"Source: Diamonds dataset analysis\"\n  ) +\n  theme_minimal(base_size = 12) +\n  theme(\n    plot.title = element_text(face = \"bold\", size = 14),\n    plot.subtitle = element_text(size = 10, color = \"grey50\"),\n    panel.grid = element_blank()\n  )\n\n\n\n\n\n\n\n\nAnalyzing the two graphs above, it is clear that the distribution of colors in individual groups is often different from the distribution in the entire set. This confirms the hypothesis about the existence of a relationship between cluster membership and color.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "wl-clustering-infer-2.html#summary",
+    "href": "wl-clustering-infer-2.html#summary",
+    "title": "K-means clustering and statistical inference - diamonds dataset",
+    "section": "Summary",
+    "text": "Summary\nBy dividing the diamond collection into clusters, it can be concluded that the division was made primarily based on price. The cluster assigned is related to color but price is unrelated to the diamond’s depth.\nDue to the extreme p parameter values obtained — close to 0 or 1 — the probabilities of the accepted hypotheses are very high.\nIt should be noted that the two hypotheses adopted were confirmed by the analysis of the graphs of the relevant data.\n\nConclusions from a diamond shop’s point of view\nThe above analysis proved that dividing diamonds by color and price is possible, and thanks to the resulting model, it is possible to automate the cluster assignment process. This allows for the optimization of the number of diamond shelves and their arrangement when delivering new diamonds to a jewelry store.\nThe dataset was divided into four price categories. Dividing the diamonds into more price categories would not have provided much order, and merely separating diamonds into more than four categories would have been labor-intensive and would have yielded little. Furthermore, the goal of the analysis was achieved – it is known that different colors dominate in each price category, so the display can be adjusted. Therefore:\n\nDiamonds from cluster one should have a display that well highlights colors G and E – appropriate shelves and other display materials must be ordered.\nDiamonds from cluster two should have a display that well highlights color E.\nDiamonds from cluster three should have a display that well highlights colors F, G, and H.\nDiamonds from cluster four should have a display that well highlights colors G, H, and I.",
+    "crumbs": [
+      "Home",
+      "Data Science",
+      "K-means clustering and statistical inference - diamonds datase"
+    ]
+  },
+  {
+    "objectID": "quakes_v7.html",
+    "href": "quakes_v7.html",
+    "title": "Analysis of earthquake data in specific regions of the quakes collection area using Plotly",
+    "section": "",
+    "text": "The purpose of this analysis is to determine the characteristics of earthquakes in specific regions of Melanesia. Earthquakes in this region are described by a quakes dataset. This dataset provides earthquake coordinates. This area will be divided into three earthquake-concentrated areas: western, eastern, and southern.\nThis analysis allows us to answer questions about the characteristics of earthquakes in particular regions.",
+    "crumbs": [
+      "Home",
+      "Data Analysis",
+      "Analysis of earthquake data using Plotly"
+    ]
+  },
+  {
+    "objectID": "quakes_v7.html#introduction",
+    "href": "quakes_v7.html#introduction",
+    "title": "Analysis of earthquake data in specific regions of the quakes collection area using Plotly",
+    "section": "",
+    "text": "The purpose of this analysis is to determine the characteristics of earthquakes in specific regions of Melanesia. Earthquakes in this region are described by a quakes dataset. This dataset provides earthquake coordinates. This area will be divided into three earthquake-concentrated areas: western, eastern, and southern.\nThis analysis allows us to answer questions about the characteristics of earthquakes in particular regions.",
+    "crumbs": [
+      "Home",
+      "Data Analysis",
+      "Analysis of earthquake data using Plotly"
+    ]
+  },
+  {
+    "objectID": "quakes_v7.html#loading-libraries-and-data",
+    "href": "quakes_v7.html#loading-libraries-and-data",
+    "title": "Analysis of earthquake data in specific regions of the quakes collection area using Plotly",
+    "section": "1. Loading libraries and data",
+    "text": "1. Loading libraries and data\n\nlibrary(ggplot2)\nlibrary(leaflet)\nlibrary(plotly)\nlibrary(dplyr)\nlibrary(tidyr)\n\n\ndata(\"quakes\")\n\n\nquakes_df &lt;- quakes",
+    "crumbs": [
+      "Home",
+      "Data Analysis",
+      "Analysis of earthquake data using Plotly"
+    ]
+  },
+  {
+    "objectID": "quakes_v7.html#initial-data-exploration",
+    "href": "quakes_v7.html#initial-data-exploration",
+    "title": "Analysis of earthquake data in specific regions of the quakes collection area using Plotly",
+    "section": "2. Initial data exploration",
+    "text": "2. Initial data exploration\nFirst, we evaluate the structure of the geographic coordinates and the earthquake map.\nFirst, the map will be analyzed.\n\nleaflet() %&gt;%\n  addTiles() %&gt;%\n  addCircleMarkers(lng = quakes_df$long,\n                   lat = quakes_df$lat,\n                   color = \"red\")\n\n\n\n\n\nThe map clearly shows that the earthquake coordinate points are grouped into 3 areas - east, west and south.\nNext, a histogram analysis of geographic coordinates will be performed.\n\nplot_ly(data = quakes_df, x = ~lat) %&gt;%\n  add_histogram() %&gt;%\n  layout(title = \"Distribution of Earthquake Latitiude\")\n\n\n\n\n\n\nplot_ly(data = quakes_df, x = ~long) %&gt;%\n  add_histogram() %&gt;%\n  layout(title = \"Distribution of Earthquake Longitiude\")\n\n\n\n\n\nHistograms of geographic coordinates confirm the earthquake map analysis - there are three areas of earthquake concentration.\nThe next element is the analysis of the earthquake magnitude histogram.\n\nplot_ly(data = quakes_df, x = ~mag) %&gt;%\n  add_histogram() %&gt;%\n  layout(title = \"Distribution of Earthquake Magnitude\")\n\n\n\n\n\nIt is clear that the distribution is skewed, so it is worth dividing the earthquake magnitudes into categories.",
+    "crumbs": [
+      "Home",
+      "Data Analysis",
+      "Analysis of earthquake data using Plotly"
+    ]
+  },
+  {
+    "objectID": "quakes_v7.html#new-categories-based-on-quantiles",
+    "href": "quakes_v7.html#new-categories-based-on-quantiles",
+    "title": "Analysis of earthquake data in specific regions of the quakes collection area using Plotly",
+    "section": "3. New categories based on quantiles",
+    "text": "3. New categories based on quantiles\nQuantiles can be used to divide data into ranges of values. They determine the percentage of data that falls below a given quantile.\n\nmag_quantiles &lt;- quantile(quakes_df$mag)\n\nHaving the magnitude quantiles and knowing the coordinates of earthquake concentration areas based on maps and histograms, it is possible to divide earthquakes according to magnitude category and region.\n\nquakes_processed &lt;- quakes_df %&gt;%\n  mutate(\n    mag_category = case_when(\n      mag &lt; mag_quantiles[2] ~ \"1 (weak)\",\n      mag &gt;= mag_quantiles[2] & mag &lt; mag_quantiles[3] ~ \"2 (moderate)\",\n      mag &gt;= mag_quantiles[3] & mag &lt; mag_quantiles[4] ~ \"3 (strong)\",\n      mag &gt;= mag_quantiles[4] ~ \"4 (very strong)\"\n    ) %&gt;% factor(ordered = TRUE, levels = c(\"1 (weak)\", \"2 (moderate)\", \"3 (strong)\", \"4 (very strong)\")),\n    \n    region = case_when(\n      lat &gt; -25 & long &lt; 171 ~ \"North-West\",\n      lat &gt; -25 & long &gt; 171 ~ \"North-East\",\n      lat &lt;= -25             ~ \"South\"\n    ) %&gt;% factor()\n  )\n\nRegions are visible in this:\n\nregions_palette &lt;- colorFactor(palette = c(\"red\", \"green\", \"blue\"), domain = quakes_processed$region)\n\nleaflet(quakes_processed) %&gt;%\n  addTiles() %&gt;%\n  addCircleMarkers(lng = ~long,\n                   lat = ~lat,\n                   color = ~regions_palette(region))\n\n\n\n\n\nThe magnitude distribution is as follows:\n\nmag_palette &lt;- colorFactor(c(\"blue\", \"lightblue\", \"pink\", \"red\"), quakes_processed$mag_category)\n\nleaflet(quakes_processed) %&gt;%\n  addTiles() %&gt;%\n  addCircleMarkers(\n    color = ~mag_palette(mag_category),\n    popup = ~paste(\"Lat:\", lat, \"&lt;br&gt;Long:\", long, \"&lt;br&gt;Magnitude:\", mag_category)\n  )\n\nAssuming \"long\" and \"lat\" are longitude and latitude, respectively\n\n\n\n\n\n\nIt is clear that strong earthquakes occur in all areas, and the points overlap. Therefore, histograms will be used in further analyses.",
+    "crumbs": [
+      "Home",
+      "Data Analysis",
+      "Analysis of earthquake data using Plotly"
+    ]
+  },
+  {
+    "objectID": "quakes_v7.html#characteristics-of-regions",
+    "href": "quakes_v7.html#characteristics-of-regions",
+    "title": "Analysis of earthquake data in specific regions of the quakes collection area using Plotly",
+    "section": "4. Characteristics of regions",
+    "text": "4. Characteristics of regions\nIn this section, earthquake characteristics will be assessed by region.\n\nMagnitude assessment by region\nThe graph below allows you to use an animation to show what the earthquake histograms are like in individual regions.\n\nplot_ly(\n  data = quakes_processed,\n  x = ~mag,\n  frame = ~region\n) %&gt;%\n  add_histogram() %&gt;%\n  layout(title = \"Distribution of Earthquake Magnitude\",\n    yaxis = list(range = c(0, 80))) %&gt;%\n  animation_opts(\n    frame = 2000,   \n    transition = 0, \n    redraw = TRUE,\n    mode = \"immediate\"\n  ) %&gt;%\n  animation_button(\n    label = \"Play\" \n  ) %&gt;%\n  animation_slider(\n    currentvalue = list(prefix = \"Region: \")\n  )\n\n\n\n\n\nIt is clear that the northeastern region has the most earthquakes, although in most cases they are not significantly stronger than earthquakes in other regions.\nThe next graph is a boxplot showing quartiles indicating what percentage of the data falls within what range of values.\n\nplot_ly(\n  data = quakes_processed,\n  x = ~region,\n  y = ~mag\n) %&gt;%\n  add_boxplot()\n\n\n\n\n\nBased on the boplot chart, it can be concluded that earthquakes in the North-West region are generally the most powerful and are stronger than those in the other two regions.\n\n\nMagnitude structure in individual regions\nIn order to assess the distribution of magnitudes in individual regions, a bar chart with the “stack” mode will be used, which will allow determining not only the number of earthquakes in a given region, but also whether they are usually strong or weak.\nFirst, earthquakes of a given category in a given region are counted. This is done using the count function, although group_by and summarise can also be used.\n\nregion_mag_counts &lt;- quakes_processed %&gt;%\n  count(region, mag_category, name = \"number_of_quakes\")\n\nThen a bar chart is drawn with the “stack” mode\n\nplot_ly(\n  data = region_mag_counts,\n  x = ~region,\n  y = ~number_of_quakes,\n  color = ~mag_category\n) %&gt;%\n  add_bars() %&gt;%\n  layout(\n    barmode = \"stack\",\n    title = \"Magnitude Structure within each region\"\n  )\n\n\n\n\n\nIt is clearly seen that the highest number of earthquakes occurs in the North-East region, but the highest percentage of strongest earthquakes is in the North-West region, which confirms the conclusions from the boxplot.\n\n\nCharacteristics of magnitude categries\nThe next step is to assess the magnitude categories. First, ensure that the individual magnitude categories have similar numbers.\n\nmag_counts &lt;- quakes_processed %&gt;%\n  count(mag_category, name = \"number_of_quakes\")\n\n\nplot_ly(\n  data = mag_counts,\n  x = ~mag_category,\n  y = ~number_of_quakes\n) %&gt;%\n  add_bars() %&gt;%\n  layout(title = \"Number of Earthquakes by Magnitude Category\")\n\n\n\n\n\nIt is clearly visible that the numbers of individual categories are similar.\nThe next step is to determine the region where the most strong earthquakes occur through direct comparison.\nFor this purpose, a graph of the percentage of strong earthquakes in all earthquakes will be developed.\n\nstrongest_quakes_pct &lt;- quakes_processed %&gt;%\n  group_by(region) %&gt;%\n  summarise(\n    percent_of_strongest = mean(mag_category == \"4 (very strong)\") * 100\n  )\n\n\nplot_ly(\n  data = strongest_quakes_pct,\n  x = ~region,\n  y = ~percent_of_strongest,\n  type = \"bar\"\n) %&gt;%\n  layout(\n    title = \"Percentage of Strongest Quakes (Category 4) in Each Region\",\n    yaxis = list(title = \"% of Strongest Quakes\")\n  )\n\n\n\n\n\nThe obtained graph confirms the preliminary conclusions from other graphs - the largest share of earthquakes is in the North-West region.\n\nstation_number_stats &lt;- quakes_processed %&gt;%\n  group_by(region, stations) %&gt;%\n  summarise(median_mag = median(mag))\n\n\n\nEarthquake analysis by number of detection stations\nTo assess the detectability of earthquakes in individual regions, it is necessary to develop a correlation between the region and the detection stations. For an effective presentation, individual earthquakes will be grouped into quantiles.\n\nstations_quantiles &lt;- quantile(quakes_processed$stations)\n\n\nstations_region_stat &lt;- quakes_processed %&gt;%\n  mutate(\n    stations_category = case_when(\n      stations &lt; stations_quantiles[2] ~ \"1 (Few)\",\n      stations &gt;= stations_quantiles[2] & stations &lt; stations_quantiles[3] ~ \"2 (Moderate-)\",\n      stations &gt;= stations_quantiles[3] & stations &lt; stations_quantiles[4] ~ \"3 (Moderate+)\",\n      stations &gt;= stations_quantiles[4] ~ \"4 (A lot)\"\n    )\n  ) %&gt;%\n  mutate(\n    stations_category = factor(stations_category, ordered = TRUE)\n  )\n\nThen, a grouping will be used to count how many earthquakes there are in each category.\n\nstations_region_stat_n &lt;- stations_region_stat %&gt;%\n  group_by(stations_category) %&gt;%\n  summarise(number_of =n())\n\n\nplot_ly(\n  data = stations_region_stat_n,\n  x = ~stations_category,\n  y = ~number_of\n) %&gt;%\n  add_bars() %&gt;%\n  layout(\n    title = \"Number of rows in stions categories\"\n  )\n\n\n\n\n\nIt is clearly seen that the earthquakes were divided into equal ranges based on quantiles.\nHeat maps should then be created showing how many stations detect the earthquake in each region.\n\nplot_ly(\n  data = stations_region_stat,\n  x = ~region,\n  y = ~stations_category\n) %&gt;%\n  add_histogram2d() %&gt;%\n  layout(\n    title = \"Number of rows in stations categories in region\"\n  )\n\n\n\n\n\nIt’s clear that earthquakes are detected by the largest number of stations in the Northeast region. Given that earthquakes in this region aren’t the most intense, this suggests that the region has the most effective earthquake detection system.\n\n\nAssessment of earthquake detectability in individual regions based on the number of stations\nTo assess the effectiveness of earthquake detection in individual regions, it is necessary to determine the relationship between the number of detection stations and the magnitude in each region. The first approach is a linear graph.\n\nplot_ly(\n  data = station_number_stats,\n  x = ~stations,\n  y = ~median_mag,\n  type = \"scatter\",\n  mode = \"lines\",\n  color = ~region\n) %&gt;%\n  layout(title = \"Estimation of median magnitude by number of stations - smooth\")\n\n\n\n\n\nIt is clearly visible that it is not a good idea to use a line graph for this analysis.\nTherefore, the loess method will be used to regress the expected value of the magnitude-number of stations relationship.\nFirst, we create a list of estimates.\n\nregion_plots &lt;- list()\n\nfor(region_n in levels(station_number_stats$region)) {\n  region_df &lt;- station_number_stats %&gt;% filter(region == region_n)\n  \n  loess_object &lt;- loess(median_mag ~ stations, data = region_df, span = 0.5)\n  \n  prediction_object &lt;- predict(loess_object)\n  \n  region_plots[[region_n]] &lt;- prediction_object\n}\n\nThen a function is created to obtain a smoothed estimate for a given region\n\nadding_smooth &lt;- function(region_n){\n  station_number_stats_smooth &lt;- station_number_stats %&gt;%\n    filter(region == region_n) %&gt;%\n    mutate(\n      median_mag = region_plots[[region_n]]\n    )\n  return(station_number_stats_smooth)\n}\n\nThen in the loop we get the smoothed magnitude estimation values.\n\nlist_smooth &lt;- list()\nfor(region_n in levels(station_number_stats$region))\n  {\n    list_smooth[[region_n]] &lt;- adding_smooth(region_n)\n  }\n\nThe data is then placed into a tibble for easier presentation.\n\nsmooth_drawing_tb &lt;- tibble()\nfor(region_n in list_smooth) {\n  smooth_drawing_tb &lt;- smooth_drawing_tb %&gt;% bind_rows(region_n)\n}\n\nThe last step is to draw a magnitude graph for individual regions depending on the number of stations.\n\nplot_ly(\n  data = smooth_drawing_tb,\n  x = ~stations,\n  y = ~median_mag,\n  type = \"scatter\",\n  mode = \"lines\",\n  color = ~region\n) %&gt;%\n  layout(title = \"Estimation of median magnitude by number of stations - smooth\")\n\n\n\n\n\nThe graph shows that the southern region has too few stations - earthquakes of a given magnitude are detected by fewer stations than earthquakes of the same strength in other regions.\n\n\nAssessment of earthquake depth in individual regions\nTo assess earthquake depth in specific regions, a categorical variable representing depth must be created. As before, quantiles will be used for this purpose.\n\ndepth_quantiles &lt;- quantile(quakes_processed$depth)\n\n\nstations_depth_stat &lt;- quakes_processed %&gt;%\n  mutate(\n    depth_category = case_when(\n      depth &lt; depth_quantiles[2] ~ \"1 (Shallow)\",\n      depth &gt;= depth_quantiles[2] & depth &lt; depth_quantiles[3] ~ \"Moderate-\",\n      depth &gt;= depth_quantiles[3] & depth &lt; depth_quantiles[4] ~ \"Moderate+\",\n      depth &gt;= depth_quantiles[4] ~ \"2 (Deep)\"\n    )\n  ) %&gt;%\n  mutate(\n    depth_category = factor(depth_category, ordered = TRUE)\n  )\n\nThen, two graphs will be developed showing the earthquake depths in particular regions - for weak and strong earthquakes.\n\nweak_quakes_plot &lt;- plot_ly(\n  data = filter(stations_depth_stat, mag_category == \"1 (weak)\"),\n  x = ~depth_category,\n  y = ~region\n) %&gt;%\n  add_histogram2d() %&gt;%\n  layout(title = \"Weak Quakes\")\n\n\nstrong_quakes_plot &lt;- plot_ly(\n  data = filter(stations_depth_stat, mag_category == \"4 (very strong)\"),\n  x = ~depth_category,\n  y = ~region\n) %&gt;%\n  add_histogram2d() %&gt;%\n  layout(title = \"Very Strong Quakes\")\n\nThen, using the subplot function, one plot is created for strong and weak earthquakes.\n\nsubplot(weak_quakes_plot, strong_quakes_plot, nrows = 2, shareY = TRUE, shareX = TRUE, margin = 0.05) %&gt;%\n  layout(\n    title = \"Comparison of Distribution for Weak and Very Strong Quakes\"\n  )\n\n\n\n\n\nFrom the above graphs, it is clear that the North-East region differs significantly from the other two in terms of earthquake depth distribution.",
+    "crumbs": [
+      "Home",
+      "Data Analysis",
+      "Analysis of earthquake data using Plotly"
+    ]
+  },
+  {
+    "objectID": "quakes_v7.html#summary",
+    "href": "quakes_v7.html#summary",
+    "title": "Analysis of earthquake data in specific regions of the quakes collection area using Plotly",
+    "section": "5. Summary",
+    "text": "5. Summary\nIt is clear that the Northeast region has the highest number of earthquakes, but these include many weak earthquakes. Furthermore, the earthquake depth structure differs from the other two regions.\nThe Northwest region is characterized by a moderate number of earthquakes, but very strong earthquakes occur, with a higher percentage than in other regions.\nThe southern region is characterized by lower earthquake detection efficiency – they are detected by fewer stations than in other regions. This may be due to difficulties locating new stations – there are few islands between Melanesia and New Zealand.\nTherefore, the basic recommendation is to effectively warn the Northwest region about earthquakes – they are not frequent, which reduces vigilance, but when they do occur, they can be surprisingly strong. The Northwest region should be assessed for the cause of earthquakes, as their depth structure differs from other regions. The southern region should consider increasing the number of stations, if physically possible.",
+    "crumbs": [
+      "Home",
+      "Data Analysis",
+      "Analysis of earthquake data using Plotly"
+    ]
+  },
+  {
+    "objectID": "msfabric_v2.html",
+    "href": "msfabric_v2.html",
+    "title": "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public",
+    "section": "",
+    "text": "The goal of this project is to develop a data warehouse that combines data from multiple sources to provide analytical data for a fictional diamond trading company. Data sources in this architecture are typically relational databases—typically web application databases. For simplicity, this project will utilize a single data source: an OLTP PostgreSQL database hosted in the Render.com cloud. This database will contain a range of data typical of a web application for an online diamond store. However, due to the complexity of the diamond trading problem, this data has been simplified. This data was generated using a series of R scripts.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public"
+    ]
+  },
+  {
+    "objectID": "msfabric_v2.html#introduction",
+    "href": "msfabric_v2.html#introduction",
+    "title": "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public",
+    "section": "",
+    "text": "The goal of this project is to develop a data warehouse that combines data from multiple sources to provide analytical data for a fictional diamond trading company. Data sources in this architecture are typically relational databases—typically web application databases. For simplicity, this project will utilize a single data source: an OLTP PostgreSQL database hosted in the Render.com cloud. This database will contain a range of data typical of a web application for an online diamond store. However, due to the complexity of the diamond trading problem, this data has been simplified. This data was generated using a series of R scripts.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public"
+    ]
+  },
+  {
+    "objectID": "msfabric_v2.html#elt-pipeline-project",
+    "href": "msfabric_v2.html#elt-pipeline-project",
+    "title": "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public",
+    "section": "1. ELT pipeline project",
+    "text": "1. ELT pipeline project\nData warehouses shouldn’t be fed directly, but rather through processes that transfer data from sources such as application databases to the data warehouse. These processes are referred to as ETL and ELT. Due to the lack of a data transformation subsystem—which simplifies the system—the ELT process will be used, which transforms data in the warehouse.\nAs a result of the ELT pipeline – part of EL – data is placed in the data warehouse, specifically in the staging layer. In this paper, a pipeline will be created for this purpose using Data Factory.\nThe data is then transformed in the data warehouse in the intermediate and presentation layers. A separate pipeline will be created in Data Factory for this purpose.\nThe above processes are illustrated in the diagram below.\n\n\n\n\n\nflowchart LR\n\nclassDef default fill:#ffffff,stroke:#000,stroke-width:1px,color:#000,rx:10,ry:10;\n\nsubgraph Sources[\"Data Sources\"]\n  A1[\"OLTP DB\"]\n  A2[\"Files / Streams\"]\nend\n\nsubgraph Staging[\"Staging Layer\"]\n  B1[\"Raw & Ingested Data\"]\nend\n\nsubgraph Intermediate[\"Intermediate Layer\"]\n  S1[\"Validated & Transformed Data\"]\nend\n\nsubgraph Presentation[\"Presentation Layer\"]\n  G1[\"Business-Ready / Analytical Data\"]\nend\n\nsubgraph Outputs[\"Data Consumers\"]\n  D1[\"BI Tools\"]\n  D2[\"ML Models\"]\nend\n\nstyle Sources fill:#ffffff,stroke:#000,color:#000,stroke-width:1px;\nstyle Staging fill:#ffffff,stroke:#000,color:#000,stroke-width:1px;\nstyle Intermediate fill:#ffffff,stroke:#000,color:#000,stroke-width:1px;\nstyle Presentation fill:#ffffff,stroke:#000,color:#000,stroke-width:1px;\nstyle Outputs fill:#ffffff,stroke:#000,color:#000,stroke-width:1px;\n\nA1 --&gt; B1\nA2 --&gt; B1\nB1 --&gt; S1 --&gt; G1\nG1 --&gt; D1\nG1 --&gt; D2\n\n\n\n\n\n\nTo sum up - two pipelines will be created in Data Factory - one corresponding to the EL part - for data transfer and the other for data transformation in the warehouse - corresponding to the “T” process of the ELT pipeline.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public"
+    ]
+  },
+  {
+    "objectID": "msfabric_v2.html#data-migration-to-postgresql-in-the-render.com-cloud",
+    "href": "msfabric_v2.html#data-migration-to-postgresql-in-the-render.com-cloud",
+    "title": "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public",
+    "section": "2. Data migration to PostgreSQL in the Render.com Cloud",
+    "text": "2. Data migration to PostgreSQL in the Render.com Cloud\nThe first step of the task is to generate data using scripts and place it in a database accessible by MS Fabric. This will be accomplished using a PostgreSQL database hosted on the Render.com platform.\n\n2.1. Create a PostgreSQL instance on the Render.com Cloud\nA PostgreSQL database can be easily installed on PostgreSQL servers, even in the free version. The Render.com platform provides an administration panel for monitoring database status and other functionalities, but SQL queries must be executed from a separate environment.\n\n\n\nPicture 1. Render.com - PostgreSQL DB Dashboard\n\n\n\n\n2.2 Create a database structure using the DBI package\nThe generated data fits the database design defined by the ERD diagram below.\n To populate the database with sample data, you need to use a number of R libraries.\n\nlibrary(DBI)\nlibrary(RPostgres)\nlibrary(readr)\n\nThen, an instance of the database connection is created.\n\ncon &lt;- dbConnect(\n  RPostgres::Postgres(),\n  dbname = \"diamonds_clients\",\n  host = \"secret-a.frankfurt-postgres.render.com\",\n  port = 5432,\n  user = \"wojciech\",\n  password = \"secret\"\n)\n\nThen, using subsequent calls to the dbExecute function, subsequent SQL commands are executed in the database, creating tables according to the adopted design (ERD diagram).\n\ndbExecute(con, '\n  CREATE TABLE \"customers\" (\n    \"CustomerID\" INTEGER PRIMARY KEY,\n    \"CountryID\" INTEGER,\n    \"created_at\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY(\"CountryID\") REFERENCES countries(\"CountryID\")\n  );\n')\n\n\ndbExecute(con, '\n  CREATE TABLE \"diamonds\" (\n    \"DiamondID\" INTEGER PRIMARY KEY,\n    \"carat\" DOUBLE PRECISION,\n    \"cut\" TEXT,\n    \"color\" TEXT,\n    \"clarity\" TEXT,\n    \"depth\" DOUBLE PRECISION,\n    \"table\" DOUBLE PRECISION,\n    \"price\" INTEGER,\n    \"x\" DOUBLE PRECISION,\n    \"y\" DOUBLE PRECISION,\n    \"z\" DOUBLE PRECISION,\n    \"created_at\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n  );\n')\n\n\ndbExecute(con, '\n  CREATE TABLE \"transactions\" (\n    \"TransactionID\" INTEGER PRIMARY KEY,\n    \"CustomerID\" INTEGER REFERENCES \"customers\"(\"CustomerID\"),\n    \"DiamondID\" INTEGER REFERENCES \"diamonds\"(\"DiamondID\"),\n    \"Quantity\" INTEGER,\n    \"created_at\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n  );\n')\n\n\ndbExecute(con, '\n  CREATE TABLE \"countries\" (\n    \"CountryID\" INTEGER PRIMARY KEY,\n    \"country\" TEXT,\n    \"region\" TEXT,\n    \"GNI_per_capita\" INTEGER,\n    \"created_at\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n  );\n')\n\nAs a result of executing a series of rather extensive SQL scripts, the countries_df, customers_df, and transactions_df data frames were created, which will be written to the appropriate tables using the dbWriteTable function. In addition, the standard Diamonds data set will be written to the database in the form of diamonds_df.\n\ndbWriteTable(con, \"countries\", countries_df, append = TRUE)\ndbWriteTable(con, \"customers\", customers_df, append = TRUE)\ndbWriteTable(con, \"diamonds\", diamonds_df, append = TRUE)\ndbWriteTable(con, \"transactions\", transactions_df, append = TRUE)\n\nUsing the PgAdmin program, you can - after entering the connection string - query previously created and filled tables.\n\n\n\nPicture 3. PgAdmin\n\n\n\n\n2.3. Preparing a Data Warehouse on the Microsoft Fabric platform\nThe Microsoft Fabric platform provides a range of data-related services. One such service is an SQL-based data warehouse. This OLAP data warehouse offers significantly better performance when querying large volumes of data than traditional OLTP databases.\n\n\n2.4. Preparing the ELT pipeline using Data Factory - EL part\nMicrosoft Fabric offers Data Factory, a simplified version of Azure Data Factory. This service is used for all ELT/ETL pipeline-related activities.\nTo perform the ELT process, you first need to start with the EL part – copying data from the source to the data warehouse. Data Factory enables this task through functional blocks that simplify SQL queries – such as the Copy Data block. Four blocks have been introduced to copy individual tables from the PostgreSQL database to the Data Warehouse – the staging layer.\n Due to the assumption of automating the data transfer process, each block has an SQL query that selects only those records that are younger than the interval period - this way, only new records will be sent to the data warehouse.\n\nSELECT *\nFROM diamonds\nWHERE created_at &gt; NOW() - INTERVAL '1 day';\n\n\nSELECT *\nFROM customers\nWHERE created_at &gt; NOW() - INTERVAL '1 day';\n\n\nSELECT *\nFROM transactions\nWHERE created_at &gt; NOW() - INTERVAL '1 day';\n\n\n\n2.4. Preparing the ELT pipeline using Data Factory - T part\nAccording to the adopted data transformation architecture, the data is first cleansed in the intermediate layer. Then, the data is transformed into a form more suitable for data analysis in the presentation layer.\n Data Factory enables this goal to be achieved using a series of blocks. First, to prevent code duplication, a ForEach block was used, which allows data to be transferred from the staging layer to the intermediate layer. It is assumed that only records younger than the interval period will be transferred, so that only records not yet present in the intermediate layer are transferred.\n\nSELECT * FROM stg.@{item()} WHERE created_at &gt; DATEADD(HOUR, -2, GETDATE());\n\nThen, in the intermediate layer, the records are cleaned of unwanted values.\n\nDELETE FROM intermediate.diamond\nWHERE price IS NULL\n   OR price &lt; 0\n   OR carat IS NULL\n   OR carat &lt;= 0\n   OR x IS NULL OR x &lt;= 0\n   OR y IS NULL OR y &lt;= 0\n   OR z IS NULL OR z &lt;= 0\n   OR cut IS NULL\n   OR color IS NULL\n   OR clarity IS NULL;\n   \nDELETE FROM intermediate.countries\nWHERE country IS NULL\n   OR LTRIM(RTRIM(country)) = ''\n   OR region IS NULL\n   OR LTRIM(RTRIM(region)) = ''\n   OR GNI_per_capita IS NULL\n   OR GNI_per_capita &lt; 0;\n   \nDELETE FROM intermediate.customers\nWHERE CustomerID IS NULL\n   OR CountryID IS NULL\n   OR CustomerID &lt;= 0\n   OR CountryID &lt;= 0;\n   \nDELETE FROM intermediate.transactions\nWHERE TransactionID IS NULL\n   OR CustomerID IS NULL\n   OR DiamondID IS NULL\n   OR Quantity IS NULL\n   OR Quantity &lt;= 0;\n\nThen, using LEFT JOIN, the existing table DimDiamonds in the intermediate layer is joined with the table in the presentation layer - DimDiamonds, and only diamonds that were not in DimDiamonds and which are therefore null as a result of LEFT JOIN are indicated.\n\nSELECT \n    s.DiamondID,\n    s.carat,\n    s.cut,\n    s.color,\n    s.clarity,\n    s.depth,\n    s.[table],\n    s.price,\n    s.x,\n    s.y,\n    s.z\nFROM intermediate.diamonds s\nLEFT JOIN presentation.DimDiamonds g\n    ON g.DiamondID = s.DiamondID\nWHERE g.DiamondID IS NULL;\n\nThe same procedure applies to DimCountries.\n\nSELECT \n    s.CountryID,\n    s.country,\n    s.region,\n    s.GNI_per_capita\nFROM intermediate.countries s\nLEFT JOIN presentation.DimCountries g\n    ON g.CountryID = s.CountryID\nWHERE g.CountryID IS NULL;\n\nTo pass data to DimCustomers, a CTE query is created using the WITH clause, preceded by a semicolon as parser protection (as recommended by T-SQL). The CTE query retrieves records that are not yet in the DimCustomers table but are in the intermediate layer. Inside the CTE, a JOIN statement is used to populate certain columns with data from the Countries table.\nThen, using the INSERT INTO statement, the data specified in the SELECT statement (retrieves data from the CTE) is inserted into the target table.\n\n;WITH NotInPresentation AS \n    SELECT \n        c.CustomerID,\n        co.country,\n        co.region,\n        co.GNI_per_capita\n    FROM intermediate.customers c\n    JOIN intermediate.countries co \n        ON c.CountryID = co.CountryID\n    WHERE NOT EXISTS (\n        SELECT 1\n        FROM presentation.DimCustomers g\n        WHERE g.CustomerID = c.CustomerID\n    )\n)\nINSERT INTO presentation.DimCustomers (CustomerID, CountryName, Region, GNIPerCapita)\nSELECT \n    CustomerID,\n    country,\n    region,\n    GNI_per_capita\nFROM NotInPresentation;\n\nA similar process as for Dim Customers takes place for Fact Transactions.\n\n;WITH NewTransactions AS \n    SELECT \n        t.TransactionID,\n        t.CustomerID,\n        t.DiamondID,\n        c.CountryID,\n        CONVERT(INT, FORMAT(t.created_at, 'yyyyMMdd')) AS DateKey,\n        t.Quantity,\n        d.price AS UnitPrice,  \n        t.Quantity * d.price AS TransactionValue\n    FROM intermediate.transactions t\n    JOIN intermediate.customers c ON t.CustomerID = c.CustomerID\n    JOIN intermediate.diamonds d ON t.DiamondID = d.DiamondID\n    WHERE NOT EXISTS (\n        SELECT 1\n        FROM presentation.FactTransactions f\n        WHERE f.SourceTransactionID = t.TransactionID\n    )\n)\nINSERT INTO presentation.FactTransactions \n    (CustomerID, DiamondID, CountryID, DateKey, Quantity, UnitPrice, TransactionValue, SourceTransactionID)\nSELECT \n    CustomerID,\n    DiamondID,\n    CountryID,\n    DateKey,\n    Quantity,\n    UnitPrice,\n    TransactionValue,\n    TransactionID\nFROM NewTransactions;\n\nNext, unique date values are identified in the intermediate layer to be placed in DimDate, the presentation layer. However, only date values that are not already in this table are inserted.\n\nINSERT INTO presentation.DimDate (DateKey, FullDate, Year, Month, Day\nSELECT DISTINCT \n    CONVERT(INT, FORMAT(t.created_at, 'yyyyMMdd')) AS DateKey,\n    CAST(t.created_at AS DATE) AS FullDate,\n    YEAR(t.created_at),\n    MONTH(t.created_at),\n    DAY(t.created_at)\nFROM intermediate.transactions t\nWHERE NOT EXISTS (\n    SELECT 1 \n    FROM presentation.DimDate d \n    WHERE d.DateKey = CONVERT(INT, FORMAT(t.created_at, 'yyyyMMdd'))\n);\n\nOnce you have the data in the presentation layer, you can check its actual presence, as shown in the figure below.\n ### 2.5. Semantic Model\nTo adapt data for Power BI, you need to create a semantic model that defines the data in a BI-friendly way. Among other things, you can create relationships or specify that a given column will be used as a currency—for example, a price column.\n\n\n\nPicture 7. Microsoft Fabric - Data Warehouse Semantic Model",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public"
+    ]
+  },
+  {
+    "objectID": "msfabric_v2.html#downloading-data-from-data-warehouse-to-power-bi",
+    "href": "msfabric_v2.html#downloading-data-from-data-warehouse-to-power-bi",
+    "title": "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public",
+    "section": "3. Downloading data from Data Warehouse to Power BI",
+    "text": "3. Downloading data from Data Warehouse to Power BI\nWith data from the data warehouse saved in a same-data model, you can easily download it to Power BI, even the desktop version.\nThe figure below shows a fragment of the process of downloading semantic model data to Power BI from the Microsoft Fabric cloud.\n\n\n\nPicture 8. Microsoft Power BI - import data from semantic model\n\n\nWith data loaded into Power BI, you can easily implement relationships by summing transactions for individual regions. If relationships weren’t working, a single value would be displayed for all regions—the sum of all transactions overall. However, thanks to relationships in the semantic model, the result is aggregated for individual regions.\n Next, you can create a simple report in Power BI. The first page will focus on global sales results.\n The second page covers diamond preferences for each region. Statistics and charts for each region can be toggled using the buttons.\n\n\n\nPicture 9. Microsoft Power BI - Report - Diamonds Analysis",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public"
+    ]
+  },
+  {
+    "objectID": "msfabric_v2.html#summary",
+    "href": "msfabric_v2.html#summary",
+    "title": "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public",
+    "section": "4. Summary",
+    "text": "4. Summary\nAn ELT pipeline was created using Data Factory, which allows for the elimination of duplicates, data cleansing, and transformation. The created pipeline can be automated – it can be run based on events related to OneLake or according to a schedule – at specified times using the scheduler. The pipeline is divided into two parts – one responsible for data extraction and loading into the warehouse, the other for transformations. The resulting data can be easily retrieved in a semantic model, making it easy to create BI reports.\nThe data obtained in Power BI enabled the development of a report on global sales and demand for individual diamonds in individual regions.\nThanks to the report, the management of the fictional company learned about current sales results, as well as cut and color preferences in specific regions. The BI report also answered other business questions, such as the weight of diamonds popular in which regions, and the preferred table size and depth.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Microsoft Fabric - End-to-End Diamond Sales Analytics Platform using ELT pipeline, Power BI and Tableau Public"
+    ]
+  },
+  {
+    "objectID": "lakehouse_v1.html",
+    "href": "lakehouse_v1.html",
+    "title": "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR",
+    "section": "",
+    "text": "This study created a lakehouse solution based on the Microsoft Fabric cloud.\nThe project’s goal was to develop a platform that could accommodate both unstructured and structured data.\nTo verify its feasibility, the developed lakehouse was populated with data from a PostgreSQL database. This data was generated in an R script and forms a database for a fictitious company involved in the global diamond trade. This data is based on transaction data, specifying individual transactions concluded with specific users. Data regarding users, their countries of origin, and the diamonds (the Diamonds collection) were also stored in this database.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR"
+    ]
+  },
+  {
+    "objectID": "lakehouse_v1.html#introduction",
+    "href": "lakehouse_v1.html#introduction",
+    "title": "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR",
+    "section": "",
+    "text": "This study created a lakehouse solution based on the Microsoft Fabric cloud.\nThe project’s goal was to develop a platform that could accommodate both unstructured and structured data.\nTo verify its feasibility, the developed lakehouse was populated with data from a PostgreSQL database. This data was generated in an R script and forms a database for a fictitious company involved in the global diamond trade. This data is based on transaction data, specifying individual transactions concluded with specific users. Data regarding users, their countries of origin, and the diamonds (the Diamonds collection) were also stored in this database.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR"
+    ]
+  },
+  {
+    "objectID": "lakehouse_v1.html#the-lakehouse-platform-project-that-acquires-data-via-the-elt-pipeline",
+    "href": "lakehouse_v1.html#the-lakehouse-platform-project-that-acquires-data-via-the-elt-pipeline",
+    "title": "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR",
+    "section": "1. The Lakehouse platform project that acquires data via the ELT pipeline",
+    "text": "1. The Lakehouse platform project that acquires data via the ELT pipeline\nLakehouse is a solution that combines the advantages and functionalities of a data lake and a data warehouse. Lakehouse can store all types of files (as in a data lake). Similar to data warehousing, Lakehouse can create data tables supported by SQL, but based on Delta Lake files.\nThe data flow in the lakehouse is similar to that of a data warehouse and is referred to as a medallion architecture. Raw data is placed in the bronze tier, cleansed in the silver tier, and analysis-ready data is placed in the gold tier.\nTo address these requirements, a solution based on Fabric Lakehouse was developed. It will ingest data from an external source—a PostgreSQL database on the Render.com cloud—into the lakehouse using Data Factory. Transformations will then be implemented using Data Factory to place the analysis-ready data in the gold tier.\n\n\n\nPicture 1. Project of lakehouse platform",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR"
+    ]
+  },
+  {
+    "objectID": "lakehouse_v1.html#microsoft-fabric-lakehouse---instance",
+    "href": "lakehouse_v1.html#microsoft-fabric-lakehouse---instance",
+    "title": "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR",
+    "section": "2. Microsoft Fabric Lakehouse - instance",
+    "text": "2. Microsoft Fabric Lakehouse - instance\nThe first steps were to create a Fabric workspace and create a Lakehouse instance.\n\n\n\nPicture 2. Main view in lakehouse instance",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR"
+    ]
+  },
+  {
+    "objectID": "lakehouse_v1.html#microsoft-fabric-data-factory-pipeline",
+    "href": "lakehouse_v1.html#microsoft-fabric-data-factory-pipeline",
+    "title": "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR",
+    "section": "3. Microsoft Fabric Data Factory Pipeline",
+    "text": "3. Microsoft Fabric Data Factory Pipeline\nNext, a Data Factory Pipeline was created. The first step was to copy data from the PostgreSQL database to the bronze tier. To avoid duplication, SQL queries were designed to retrieve data from before the scheduler period. The data was then transformed to the silver tier and then to the gold tier. This was accomplished using notebooks within the pipeline. A time variable was used in both of the last two steps to prevent duplication.\n\n\n\nPicture 3. Data Pipeline ELT - Data Factory - medallion architecture implementation\n\n\nThe notebook code can be found here:\nSilver Layer notebook\nGold Layer notebook",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR"
+    ]
+  },
+  {
+    "objectID": "lakehouse_v1.html#lakehouse-tables-data-overview",
+    "href": "lakehouse_v1.html#lakehouse-tables-data-overview",
+    "title": "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR",
+    "section": "4. Lakehouse tables data overview",
+    "text": "4. Lakehouse tables data overview\nAfter copying the data to the lakehouse, it is available in individual tables - the schema name corresponds to the medallion architecture layer.\n\n\n\nPicture 4. Example view - table in lakehouse instance\n\n\nLakehouse tables are based on Delta Lake files. Delta Lake files are an extension of the Parquet format. In addition to Parquet files containing data, they also store JSON files—transaction logs and, optionally, checkpoints—to describe how the data has changed. This gives the Delta Lake format significant advantages over Parquet, including support for ACID transactions and the ability to read the data history in tables.\n\n\n\nPicture 5. Delta Lake files containing lakehouse table data",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR"
+    ]
+  },
+  {
+    "objectID": "lakehouse_v1.html#example-data-analysis-using-sparkr",
+    "href": "lakehouse_v1.html#example-data-analysis-using-sparkr",
+    "title": "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR",
+    "section": "5. Example data analysis using SparkR",
+    "text": "5. Example data analysis using SparkR\nTo practically test the capabilities of the developed Lakehouse, a data analysis was conducted using data from the gold layer. The goal of the analysis was to compare the demand for specific diamonds in Israel and Italy. Using SparkR, distributed computations were implemented for acceleration.\nData Analysis notebook",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR"
+    ]
+  },
+  {
+    "objectID": "lakehouse_v1.html#summary",
+    "href": "lakehouse_v1.html#summary",
+    "title": "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR",
+    "section": "6. Summary",
+    "text": "6. Summary\n\nA lakehouse platform was developed, enabling the storage of unstructured data (such as a data lake) and structured data (such as a data warehouse) as delta lake files.\nThe Data Factory tool enabled the implementation of the Medallion architecture using Python in PySpark notebooks, making it easy to review and debug the code.\nSpark enabled rapid analysis on large data sets, but visualization often requires working with common, non-distributed data structures, which requires code optimization.\nThe analysis resulted in specific recommendations derived from data obtained after numerous transformations in SparkR. Therefore, using SparkR—and Spark in general—enables inference on massive data sets.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Lakehouse Data Analytics Platform - Microsoft Fabric Cloud - PySpark - SparkR"
+    ]
+  },
+  {
+    "objectID": "KMEANS_FLINK.html",
+    "href": "KMEANS_FLINK.html",
+    "title": "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection",
+    "section": "",
+    "text": "This book will present a method for finding the correct number of clusters and distances from centroids for the KMEANS anti-fraud model.\nData loaded to this notebook is set of valid transactions. The goal of the analysis is to obtain KMEANS parameters that will allow for the detection of transactions that deviate from the dataset loaded here.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection"
+    ]
+  },
+  {
+    "objectID": "KMEANS_FLINK.html#introduction",
+    "href": "KMEANS_FLINK.html#introduction",
+    "title": "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection",
+    "section": "",
+    "text": "This book will present a method for finding the correct number of clusters and distances from centroids for the KMEANS anti-fraud model.\nData loaded to this notebook is set of valid transactions. The goal of the analysis is to obtain KMEANS parameters that will allow for the detection of transactions that deviate from the dataset loaded here.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection"
+    ]
+  },
+  {
+    "objectID": "KMEANS_FLINK.html#loading-data-and-libraries",
+    "href": "KMEANS_FLINK.html#loading-data-and-libraries",
+    "title": "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection",
+    "section": "1. Loading data and libraries",
+    "text": "1. Loading data and libraries\n\nlibrary(dplyr)     \nlibrary(tidymodels) \nlibrary(DT)         \nlibrary(cluster)\n\n\ntransactions_df = as_tibble(read.csv(\"synthetic_transactions.csv\"))\ndf_original &lt;- transactions_df\n\nQuick preview:\n\ndatatable(transactions_df)\n\nWarning in instance$preRenderHook(instance): It seems your data is too big for\nclient-side DataTables. You may consider server-side processing:\nhttps://rstudio.github.io/DT/server.html",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection"
+    ]
+  },
+  {
+    "objectID": "KMEANS_FLINK.html#converting-data-to-numeric-form",
+    "href": "KMEANS_FLINK.html#converting-data-to-numeric-form",
+    "title": "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection",
+    "section": "2. Converting data to numeric form",
+    "text": "2. Converting data to numeric form\n\ntransactions_df &lt;- recipe(price ~.,data = transactions_df) %&gt;%\n  step_range(all_numeric(), min = 0, max = 1) %&gt;%\n  prep() %&gt;%\n  bake(new_data = NULL)",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection"
+    ]
+  },
+  {
+    "objectID": "KMEANS_FLINK.html#calculating-the-number-of-clusters",
+    "href": "KMEANS_FLINK.html#calculating-the-number-of-clusters",
+    "title": "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection",
+    "section": "3. Calculating the number of clusters",
+    "text": "3. Calculating the number of clusters\nFor a predetermined number of clusters—from 1 to 10—a silhouette is calculated. This involves calculating how well a point fits into a given cluster compared to other clusters. The result is then averaged across all points.\n\nsil_width &lt;- numeric(9) \n\nfor (k in 2:10) {\n  km &lt;- kmeans(transactions_df, centers = k, nstart = 25)\n  ss &lt;- silhouette(km$cluster, dist(df_original))\n  sil_width[k - 1] &lt;- mean(ss[, 3]) \n}\n\nOnce the values have been calculated, it is possible to draw a graph.\n\nplot(2:10, sil_width, type = \"b\", \n     xlab = \"Number of clusters\", \n     ylab = \"Mean Cof. of Silhouette\")\n\n\n\n\n\n\n\n\nThe graph shows that the best number of clusters for a given set is three.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection"
+    ]
+  },
+  {
+    "objectID": "KMEANS_FLINK.html#calculating-the-minimum-distance-from-centroids",
+    "href": "KMEANS_FLINK.html#calculating-the-minimum-distance-from-centroids",
+    "title": "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection",
+    "section": "4. Calculating the minimum distance from centroids",
+    "text": "4. Calculating the minimum distance from centroids\nFor a point to not be considered an outlier—in this case, a suspicious transaction—it must lie less than the minimum distance (threshold) from the nearest centroid.\nFirst, an instance of the kmeans model must be established.\n\nkm_model &lt;- kmeans(transactions_df, centers = 3, nstart = 25)\n\nThen a function is defined to calculate the distance from the nearest centroid.\n\nmin_dist_to_centroid &lt;- function(x, centers) {\n  apply(centers, 1, function(c) sqrt(sum((x - c)^2))) |&gt; min()\n}\n\nThe minimum distances to the centroids are then calculated.\n\ndistances &lt;- apply(transactions_df, 1, min_dist_to_centroid, centers = km_model$centers)\n\nThe maximum value from the centroid is then obtained. It is assumed that all values ​​in the set are valid transactions, so anything further from the value obtained here will be an outlier, a suspicious transaction.\n\nmax_distance &lt;- max(distances)\ncat(\"Max distance to centroid:\", round(max_distance, 4), \"\\n\")\n\nMax distance to centroid: 0.6406 \n\n\n\nhist(distances, breaks = 50, main = \"Distribution of distance from nearest centroid\", xlab = \"Distance\")\nabline(v = max_distance, col = \"red\", lwd = 2)\n\n\n\n\n\n\n\n\nIt is clearly visible that the greatest distance oscillates around 0.63",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection"
+    ]
+  },
+  {
+    "objectID": "KMEANS_FLINK.html#summary",
+    "href": "KMEANS_FLINK.html#summary",
+    "title": "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection",
+    "section": "5. Summary",
+    "text": "5. Summary\n\nThe distance obtained above which transactions should be considered suspicious is 0.63\nThe optimal number of clusters is three\nPlease note that not every transaction with a distance above 0.63 is a scam - it may simply be unusual\nThe above analysis is static. To train the model on-the-fly and obtain the specified KMEANS parameters based on the current data, you should use environments like Kafka or Flink and use Java/Scala/Python to obtain dynamically changing cluster numbers and distances from centroids.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Calculating the number of clusters and distances from centroids for the KMEANS model in fraud detection"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html",
+    "href": "kappa_v1.html",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "",
+    "text": "In this project, a data architecture was developed and implemented that implemented a system for analyzing sales data using a data warehouse fed by an ELT pipeline.\nThe core element is a PostgreSQL database containing transaction, user, and product (diamond) data. However, the system we created allows for the easy expansion of these databases, just as it is done in practice. Data from the PostgreSQL databases is transferred to the ClickHouse data warehouse and analyzed to automatically send a report containing charts to JIRA Cloud at specified intervals. The system allows for the automatic creation and insertion of reports, reducing the number of people involved in creating and distributing reports with similar content, thus increasing employee efficiency within the organization.\nCode:\nGitHub Repo",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#introduction",
+    "href": "kappa_v1.html#introduction",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "",
+    "text": "In this project, a data architecture was developed and implemented that implemented a system for analyzing sales data using a data warehouse fed by an ELT pipeline.\nThe core element is a PostgreSQL database containing transaction, user, and product (diamond) data. However, the system we created allows for the easy expansion of these databases, just as it is done in practice. Data from the PostgreSQL databases is transferred to the ClickHouse data warehouse and analyzed to automatically send a report containing charts to JIRA Cloud at specified intervals. The system allows for the automatic creation and insertion of reports, reducing the number of people involved in creating and distributing reports with similar content, thus increasing employee efficiency within the organization.\nCode:\nGitHub Repo",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#data-architecture-project",
+    "href": "kappa_v1.html#data-architecture-project",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "1. Data Architecture Project",
+    "text": "1. Data Architecture Project\nThe data source in the architecture design will be relational PostgreSQL databases. These will serve as storage for data typical of an online store—transactions, users, etc.\nThe next element will be the Debezium service—Kafka Connect. It allows tables in a specified PostgreSQL database to be automatically mapped to Kafka topics.\nThe next element is Kafka—it allows for the transfer of data streams within topics from one location to another. Its key advantages are scalability and resilience to host failures (under certain conditions). A supporting service of Kafka is the Schema Registry, which allows for easy changes to the schema of transmitted data.\nThe next component is the Kafka Consumer. It allows you to receive messages from a Kafka topic. In subsequent steps, you can use the received messages to save them to the ClickHouse data warehouse database.\nThe next element is the ClickHouse data warehouse. It enables the rapid execution of typically analytical queries—returning large amounts of data—in an OLAP database. The ClickHouse data warehouse is incomparably faster for such tasks than standard PostgreSQL databases.\nThe final element is a host that automatically creates reports and sends them to JIRA. This host first retrieves transaction data from ClickHouse, then processes the data in Pandas and creates charts in Seaborn, which are saved as a .docx document with a description. The resulting document—a dashboard displaying the latest sales statistics—is then sent to JIRA Cloud for viewing by project stakeholders.\n\n\n\nPicture 1. Project of Data Architecture\n\n\nThe entire project was developed in docker-compose, implementing all elements of the data architecture except the data generator, which is not a component, but rather a support element that replaces user interactions. An outline of the docker-compose.yaml file with the elements is shown below:\n\nservices:\n\n  clickhouse:\n    image: clickhouse/clickhouse-server:latest\n    container_name: clickhouse\n    ports:\n      - 8123:8123\n      - 9000:9000\n    ...\n\n  kafka-to-clickhouse-consumer:\n    build: ./kafka-consumer\n    container_name: kafka-to-clickhouse-consumer\n    ports:\n      - 8022:8000\n    ...\n\n  dbt_api:\n    build:\n      context: ./dbt_project\n      dockerfile: Dockerfile\n    container_name: dbt_api\n    ports:\n      - \"8000:8000\"\n    ...\n\n    \n  broker-1:\n    image: apache/kafka:latest\n    container_name: broker-1\n    ports:\n      - 29092:9092\n    environment:\n     ...\n\n  airflow:\n    build:\n      context: ./airflow\n      dockerfile: Dockerfile\n    container_name: airflow\n    ports:\n      - 8080:8080\n    ...\n      \n  airflow-postgres:\n    image: postgres:15\n    container_name: airflow-postgres\n    ports:\n      - 5432:5432\n    ...\n\n  application-postgres:\n      image: postgres:15\n      container_name: application-postgres\n      command: [\"postgres\", \"-c\", \"wal_level=logical\"]\n      ports:\n        - 5433:5432\n      ...\n\n  kafka-connect:\n    build: ./kafka-connect\n    container_name: kafka-connect\n    ports:\n      - 8083:8083\n    ...\n\n  schema-registry:\n    image: confluentinc/cp-schema-registry:7.7.0\n    container_name: schema-registry\n    depends_on:\n      - broker-1\n    ports:\n      - 8081:8081\n    environment:\n     ..\n\n  raport-creator:\n    build: ./raport-creator\n    container_name: raport-creator\n    ports:\n      - 8023:8000\n    ...\n\nTo start the above docker-compose cluster, run the attached .sh or .bat script, depending on your system. This script will first start the docker-compose cluster and then the data generator.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#data-source",
+    "href": "kappa_v1.html#data-source",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "2. Data Source",
+    "text": "2. Data Source\nThe first step is to create a synthetic data source that will allow for testing the system. Because Kafka is a streaming system, data will be transferred gradually.\nFor this purpose, a data generator was created in Python—a script that writes dummy data to the transaction, user, and product tables.\nThe most important part of this script is shown below. It’s clear that it generates a stream of records for the transaction table.\n\nwhile cnt &lt; TRANSACTION_LIMIT:\n    cnt = cnt + 1\n    user_id = randint(1, USER_COUNT)\n    prod_id = randint(1, PRODUCT_COUNT)\n\n    cur.execute(\"SELECT price FROM products WHERE id = %s;\", (prod_id,))\n    result = cur.fetchone()\n    if not result:\n        continue  \n    price = result[0]\n\n    quantity = randint(1, 5)\n    value = price * quantity\n\n    cur.execute(\"\"\"\n        INSERT INTO transactions (user_id, product_id, quantity, value)\n        VALUES (%s, %s, %s, %s);\n    \"\"\", (user_id, prod_id, quantity, value))\n    \n    if cnt % 1000 == 0:\n        print(f\"Inserted {cnt} transactions...\")\n\n    time.sleep(0.01)",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#kafka-connect---postgre---debezium",
+    "href": "kappa_v1.html#kafka-connect---postgre---debezium",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "3. Kafka Connect - Postgre - Debezium",
+    "text": "3. Kafka Connect - Postgre - Debezium\nThe first step is to configure the Kafka Connector - Debezium using JSON sent as an attachment to the appropriate HTTP message. This process is performed automatically when the ELT pipeline is initialized using Task in the Airflow DAG.\nTo do this, you need to specify the Kafka connection, the format of the transmitted data, message subject prefixes, and so on in the JSON.\nThis creates Kafka topics that are continuously fed with data entering the PostgreSQL database. This way, each new record in the database tables is added to a Kafka topic.\nUsing the PostgreSQL Write-Ahead Logging (WAL) logical mechanism, Debezium tracks changes to the database data (Change Data Capture). PostgreSQL itself emits a stream of changes to the database, and Debezium converts these changes into messages to the appropriate Kafka topics, avoiding hardware-intensive table queries in a loop.\n\n{\n  \"name\": \"postgres-store-connector-avro\",\n  \"config\": {\n    \"connector.class\": \"io.debezium.connector.postgresql.PostgresConnector\",\n    \"plugin.name\": \"pgoutput\",\n    \"database.hostname\": \"application-postgres\",\n    \"database.port\": \"5432\",\n    \"database.user\": \"user\",\n    \"database.password\": \"password\",\n    \"database.dbname\": \"store\",\n    \"database.server.name\": \"store_server\",\n    \"slot.name\": \"debezium_slot\",\n    \"publication.name\": \"debezium_publication\",\n    \"topic.prefix\": \"store\",\n    \"snapshot.mode\": \"initial\",\n    \"include.schema.changes\": \"false\",\n    \"decimal.handling.mode\": \"string\",\n    \"time.precision.mode\": \"adaptive_time_microseconds\",\n    \"tombstones.on.delete\": \"false\",\n    \"key.converter\": \"io.confluent.connect.avro.AvroConverter\",\n    \"key.converter.schema.registry.url\": \"http://schema-registry:8081\",\n    \"value.converter\": \"io.confluent.connect.avro.AvroConverter\",\n    \"value.converter.schema.registry.url\": \"http://schema-registry:8081\"\n  }\n}",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#kafka",
+    "href": "kappa_v1.html#kafka",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "4. Kafka",
+    "text": "4. Kafka\nKafka’s task is to transmit records stored as messages from the producer, Debezium, to a dedicated consumer. In the Kafka project, it was implemented as a docker-compose container. The declaration describes the necessary environment variables, port mappings, and the broker name (which is the DNS name in the docker-compose cluster network).\n\n  broker-1:\n    image: apache/kafka:latest\n    container_name: broker-1\n    ports:\n      - 29092:9092\n    environment:\n      KAFKA_NODE_ID: 1\n      KAFKA_PROCESS_ROLES: broker,controller\n      KAFKA_LISTENERS: 'PLAINTEXT://:19092,PLAINTEXT_HOST://:9092,CONTROLLER://:9093'\n      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker-1:19092,PLAINTEXT_HOST://localhost:29092'\n      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT\n      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER\n      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT\n      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker-1:9093\n      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1\n      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1\n      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1\n      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0\n      KAFKA_NUM_PARTITIONS: 3\n    healthcheck:\n      test: [\"CMD-SHELL\", \"/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 || exit 1\"]\n      interval: 10s\n      timeout: 5s\n      retries: 10\n      start_period: 30s",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#kafka-consumer",
+    "href": "kappa_v1.html#kafka-consumer",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "5. Kafka Consumer",
+    "text": "5. Kafka Consumer\nThe Kafka Consumer’s task is to receive Kafka messages representing records written to the PostgreSQL database. To persist records, data is written to the ClickHouse data warehouse. To accomplish this, the host running the consumer also has the task of creating tables in the ClickHouse database. Therefore, the Consumer’s host is a Unicorn server implementing two FastAPI endpoints: one is used to trigger the table creation process in ClickHouse, and the other is used to initialize the Kafka Consumer. Both of these endpoints are invoked by Airflow during ELT initialization.\nBelow is a fragment of the table creation logic:\n\nclient = clickhouse_connect.get_client(\n    host=CLICKHOUSE_HOST,\n    database=CLICKHOUSE_DB,\n    user=os.getenv(\"CLICKHOUSE_USER\", \"default\"),\n    password=os.getenv(\"CLICKHOUSE_PASSWORD\", \"\")\n)\n\nclient.command('''\n    CREATE TABLE IF NOT EXISTS transactions (\n        id UInt32,\n        user_id UInt32,\n        product_id UInt32,\n        quantity UInt8,\n        value Float64,\n        transaction_date UInt64\n    ) ENGINE = MergeTree\n    ORDER BY id;\n''')\n\nclient.command('''\n    CREATE TABLE IF NOT EXISTS users (\n        id UInt32,\n        first_name String,\n        days_of_experience Int32,\n        total_purchase_amount Float64,\n        state_province String\n    ) ENGINE = MergeTree\n    ORDER BY id;\n''')\n\nclient.command('''\n    CREATE TABLE IF NOT EXISTS products (\n        id UInt32,\n        carat Float32,\n        cut String,\n        color String,\n        clarity String,\n        depth Float32,\n        table_val Float32,\n        price Float64\n    ) ENGINE = MergeTree\n    ORDER BY id;\n''')\n\nBelow is the logic for initializing processes/threads with Kafka consumers responding to individual topics corresponding to tables in PostgreSQL:\n\nthreads = [\n    threading.Thread(\n        target=kafka_consumer_worker,\n        args=(TOPICS[\"transactions\"], \"group-transactions\", insert_transaction),\n        daemon=True\n    ),\n    threading.Thread(\n        target=kafka_consumer_worker,\n        args=(TOPICS[\"users\"], \"group-users\", insert_user),\n        daemon=True\n    ),\n    threading.Thread(\n        target=kafka_consumer_worker,\n        args=(TOPICS[\"products\"], \"group-products\", insert_product),\n        daemon=True\n    )\n]\n\nfor t in threads:\n    t.start()",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#clickhouse-with-dbt",
+    "href": "kappa_v1.html#clickhouse-with-dbt",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "5. ClickHouse with dbt",
+    "text": "5. ClickHouse with dbt\nAnother essential element is the dbt application. It enables data transformations in the ELT process within the data warehouse.\nTo implement this, the data in the warehouse was divided into layers represented by individual warehouse schemas: - staging - raw data, saved by the host with the Kafka Consumer - intermediate - data cleaned of missing values or invalid records, such as negative prices - marts - contains data in a star schema, allowing the system user to perform easy analytical queries without having to repeat joins in each data warehouse query.\nIn dbt, table transformations define models. Below is an example model from the marts layer:\n\n{{ config(materialized='incremental') }}\n\nwith sales as (\n    select\n        t.id as transaction_id,\n        t.user_id,\n        t.product_id,\n        t.quantity,\n        t.value as total_value,\n        t.transaction_date,\n        p.price as product_price,\n        p.carat,\n        p.cut,\n        p.color,\n        p.clarity,\n        u.first_name as user_first_name,\n        u.state_province as user_region,\n        u.experience_level,\n        t.value / t.quantity as value_per_unit,\n        (p.price * t.quantity) - t.value as discount_amount\n    from {{ ref('transactions_clean') }} t\n    left join {{ ref('products_clean') }} p on t.product_id = p.id\n    left join {{ ref('dim_users') }} u on t.user_id = u.user_id\n    where t.transaction_date is not null\n    {% if is_incremental() %}\n      and t.transaction_date &gt; (select max(transaction_date) from {{ this }})\n    {% endif %}\n)\n\nselect * from sales",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#report-generator",
+    "href": "kappa_v1.html#report-generator",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "6. Report Generator",
+    "text": "6. Report Generator\nThe ClickHouse data warehouse enables the creation of analytical reports using fast columnar queries that accelerate the retrieval of large amounts of data.\nHowever, creating and distributing analytical reports is time-consuming for employees, so this process can be automated. The report-creator host includes a unicorn server that, upon HTTP post request, allows the creation of a report in Microsoft Word (.docx file) using the appropriate Python packages (.docx, Seaborn, and Pandas).\nThis is accomplished through functions for generating and sending the report. The most important snippet of endpoint code is shown below:\n\nclient = clickhouse_connect.get_client(\n    host=CLICKHOUSE_HOST,\n    database=CLICKHOUSE_DB,\n    user=os.getenv(\"CLICKHOUSE_USER\", \"default\"),\n    password=os.getenv(\"CLICKHOUSE_PASSWORD\", \"\")\n)\ntry:\n    result_fact_sales = client.query('SELECT * FROM mydb_marts.fact_sales;')\n    rows_fact_sales = result_fact_sales.result_rows \n    columns_fact_sales = result_fact_sales.column_names \n    sales_df = pd.DataFrame(rows_fact_sales, columns=columns_fact_sales)\n    create_report(sales_df)\n    send_report()\nexcept Exception as e:\n    raise HTTPException(status_code=500, detail=str(e))\n\nThe report is then sent to the JIRA system, where it can be downloaded by interested parties. This is achieved thanks to the Python package - Jira, which enables the use of the Jira Cloud API, including file uploads. Below is a link to a sample report.\nExample Report - GitHub - .docx file\nThe report includes the following charts and descriptions: - Price histogram - Number of diamonds sold with a given cut grade - Average price of diamonds sold with a given cut - Total value of diamonds sold with a given cut - Number of diamonds sold with a given color - Average price of diamonds sold with a given color - Total value of diamonds sold with a given color - Number of diamonds sold with a given clarity grade - Average price of diamonds sold with a given clarity grade - Total value of diamonds sold with a given clarity grade\nA sample chart is presented below:\n\n\n\nPicture 2. Example Report in JIRA space\n\n\nOnce generated, the report is sent to JIRA using the JIRA API. Below is an example view of the created Jira Task with the attached report.\n\n\n\nPicture 3. Example Report in JIRA space\n\n\nAs mentioned, the report generator operates on HTTP requests to the Unicorn server. Such requests are sent by the Airflow Task after certain conditions are met – the process is therefore automated.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#airflow-container",
+    "href": "kappa_v1.html#airflow-container",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "7. Airflow Container",
+    "text": "7. Airflow Container\nAirflow’s role in the project is to orchestrate the ELT pipeline. For this purpose, it uses workflows—DAGs.\nTwo DAGs were created as part of the project: - one to initialize the ELT pipeline, which runs only once - the other to initiate the dbt data reconstruction process and use the ready data for analysis, which runs only after the successful completion of the ELT initialization DAG, at controlled intervals—this can be 5 minutes (tests) or several hours or days (production environment).\nBelow is the code for the Airflow DAG used to rebuild the ClickHouse data warehouse using dbt and initiate the development and submission of a report to JIRA.\n\nfrom datetime import datetime\nfrom airflow import DAG\nfrom airflow.sensors.external_task import ExternalTaskSensor\nfrom airflow.sensors.http_sensor import HttpSensor\n\nfrom utils.config import DEFAULT_ARGS \nfrom utils.dag_helpers import get_most_recent_init_dag_success\n\nwith DAG(\n    dag_id=\"dbt\",\n    start_date=datetime(2023, 1, 1),\n    schedule_interval=\"*/5 * * * *\",\n    catchup=False,\n    default_args=DEFAULT_ARGS,\n    description=\"Triggers dbt debug, run, and report creation\"\n) as dag:\n\n    wait_for_init = ExternalTaskSensor(\n        task_id=\"wait_for_init\",\n        external_dag_id=\"init\",\n        external_task_id=None, \n        mode=\"poke\",\n        poke_interval=60,\n        timeout=60 * 60 * 24,\n        execution_date_fn=get_most_recent_init_dag_success,\n    )\n\n    dbt_debug = HttpSensor(\n        task_id=\"dbt_debug\",\n        http_conn_id=\"dbt_api\",\n        endpoint=\"/dbt-debug\",\n        poke_interval=10,\n        timeout=600,\n    )\n\n    dbt_run = HttpSensor(\n        task_id=\"dbt_run\",\n        http_conn_id=\"dbt_api\",\n        endpoint=\"/dbt-run\",\n        poke_interval=10,\n        timeout=600,\n        method='POST',\n    )\n\n    create_report = HttpSensor(\n        task_id=\"create_report\",\n        http_conn_id=\"raport-creator\",\n        endpoint=\"/create_raport\",\n        poke_interval=10,\n        timeout=600,\n        method='POST',\n    )\n\n    wait_for_init &gt;&gt; dbt_debug &gt;&gt; dbt_run &gt;&gt; create_report\n\nThe figure below shows both DAGs in the Airflow UI:\n\n\n\nPicture 4. DAGs list in Airflow\n\n\nThe following is confirmation of successful completion of the ELT initialization DAG:\n\n\n\nPicture 5. DAG init run result\n\n\nA graphical representation of the initialization DAG is shown below:\n\n\n\nPicture 6. DAG init\n\n\nThe figure below shows a summary of the completion of the DAG rebuilding the data in dbt and initiating the report creation:\n\n\n\nPicture 7. DAG dbt run result\n\n\nThe figure below shows the DAG for running dbt and initializing the report build - indicating the successful completion of all Tasks.\n\n\n\nPicture 8. DAG dbt run",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "kappa_v1.html#summary",
+    "href": "kappa_v1.html#summary",
+    "title": "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira.",
+    "section": "8. Summary",
+    "text": "8. Summary\nA fully automated data warehouse data feed system was created. Data comes from the online store’s application databases.\nAutomatic reporting to JIRA reduces the workload of employees who run similar reports at specific times.\nApache Airflow enables easy orchestration of individual ELT pipeline elements, provided they are adapted to communicate with Airflow—e.g., via HTTP.\nIt is also advisable to consider using distributed computing—Spark—to distribute analytical calculations across multiple independent hosts. Currently, calculations are performed on a single host, which can be inefficient when large amounts of data are required for analysis.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Data Architecture example with Airflow, dbt, ClickHouse, Kafka with an automatic report generator in Pandas and Seaborn that automatically sends reports to Jira"
+    ]
+  },
+  {
+    "objectID": "Kmeanflinkv1.html",
+    "href": "Kmeanflinkv1.html",
+    "title": "Implementing messeges counter and KMEANS model in a Kafka Stream using Scala - Flink ML",
+    "section": "",
+    "text": "version: '3.8'\n\nservices:\n  zookeeper:\n    image: confluentinc/cp-zookeeper:7.4.0\n    environment:\n      ZOOKEEPER_CLIENT_PORT: 2181\n    ports:\n      - \"2181:2181\"\n    networks:\n      - kafka-net\n    restart: unless-stopped\n\n  kafka:\n    image: confluentinc/cp-kafka:7.4.0\n    depends_on:\n      - zookeeper\n    ports:\n      - \"9092:9092\"\n    environment:\n      KAFKA_BROKER_ID: 1\n      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181\n      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092\n      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092\n      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1\n    healthcheck:\n      test: [\"CMD\", \"kafka-broker-api-versions\", \"--bootstrap-server\", \"localhost:9092\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n    networks:\n      - kafka-net\n    restart: unless-stopped\n\n  flink-jobmanager:\n    build: ./flink_job\n    container_name: jobmanager\n    hostname: jobmanager\n    depends_on:\n      - kafka\n    ports:\n      - \"8081:8081\"\n    environment:\n      JOB_MANAGER_RPC_ADDRESS: jobmanager\n      JVM_ARGS: --add-opens=java.base/sun.net.util=ALL-UNNAMED\n      FLINK_PROPERTIES: |\n        jobmanager.rpc.address: jobmanager\n        taskmanager.numberOfTaskSlots: 4\n        parallelism.default: 1\n        rest.bind-address: 0.0.0.0\n        rest.address: jobmanager\n\n    command: &gt;\n      bash -c \"/opt/flink/bin/jobmanager.sh start-foreground & sleep 10 && bash /opt/flink_job/run_jobs.sh\"\n    volumes:\n      - ./flink_job:/opt/flink_job\n      - ./flink_job/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml \n    networks:\n      - kafka-net\n    restart: unless-stopped\n\n  flink-taskmanager:\n    build: ./flink_job\n    container_name: taskmanager\n    depends_on:\n      - flink-jobmanager\n    environment:\n      JOB_MANAGER_RPC_ADDRESS: jobmanager\n      JVM_ARGS: --add-opens=java.base/sun.net.util=ALL-UNNAMED\n      FLINK_PROPERTIES: |\n        jobmanager.rpc.address: jobmanager\n        taskmanager.numberOfTaskSlots: 4\n        parallelism.default: 1\n        rest.bind-address: 0.0.0.0\n        rest.address: jobmanager\n\n\n    command: [\"/opt/flink/bin/taskmanager.sh\", \"start-foreground\"]\n    volumes:\n      - ./flink_job:/opt/flink_job\n      - ./flink_job/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml \n    networks:\n      - kafka-net\n    restart: unless-stopped\n\n  django:\n    build: ./diamonds_shop\n    depends_on:\n      - kafka\n    ports:\n      - \"8001:8000\"\n    environment:\n      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092\n    command: python manage.py runserver 0.0.0.0:8000\n    volumes:\n      - ./diamonds_shop:/app\n    networks:\n      - kafka-net\n    restart: unless-stopped\n\n  kafka-consumer:\n    build: ./consumers\n    depends_on:\n      kafka:\n        condition: service_healthy\n    environment:\n      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092\n    command: python consumer.py\n    volumes:\n      - ./consumers:/app\n    networks:\n      - kafka-net\n    restart: unless-stopped\n\n  kafka-messages-number-consumer:\n    build: ./consumers\n    depends_on:\n      kafka:\n        condition: service_healthy\n    environment:\n      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092\n    command: python consumer_messages_number.py\n    volumes:\n      - ./consumers:/app\n    networks:\n      - kafka-net\n    restart: unless-stopped\n\n  kafka-fraud-consumer:\n    build: ./consumers\n    depends_on:\n      kafka:\n        condition: service_healthy\n    environment:\n      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092\n    command: python consumer_suspicion_of_fraud.py\n    volumes:\n      - ./consumers:/app\n    networks:\n      - kafka-net\n    restart: unless-stopped\n\n\nnetworks:\n  kafka-net:\n    name: kafka-net\n\n\npackage com.flinkmodel.job\n\nimport org.apache.flink.streaming.api.environment.StreamExecutionEnvironment\nimport org.apache.flink.table.api.bridge.java.StreamTableEnvironment\nimport org.slf4j.LoggerFactory\nimport com.flinkmodel.io._\nimport com.flinkmodel.features._\nimport com.flinkmodel.training._\n\nimport com.typesafe.config.ConfigFactory\n\nobject TrainModelJob {\n  val loggerObj = LoggerFactory.getLogger(getClass)\n\n  def main(args: Array[String]): Unit = {\n    val config = ConfigFactory.load()\n    val env = StreamExecutionEnvironment.getExecutionEnvironment\n    val tEnv = StreamTableEnvironment.create(env)\n\n    val dataPath = config.getString(\"flink.data-path\")\n    val modelDirectory = config.getString(\"flink.model-directory\")\n\n    val transactions = DataLoader.loadTransactions(tEnv, dataPath)\n    val withFeatures = FeaturePreprocessor.assembleFeatures(transactions, tEnv)\n    val (scaled, minVals, maxVals) = FeaturePreprocessor.scaleFeatures(withFeatures)\n    val centers = KMeansTrainer.train(scaled)\n\n    ModelSaver.saveCenters(modelDirectory, centers)\n    ModelSaver.saveScaler(modelDirectory, minVals, maxVals)\n\n    loggerObj.info(\"Success of training\")\n  }\n}\n\n\npackage com.flinkmodel.training\n\nimport org.apache.flink.ml.clustering.kmeans.KMeans\nimport org.apache.flink.ml.linalg.DenseVector\n\nobject KMeansTrainer {\n  def train(table: org.apache.flink.table.api.Table): Array[Array[Double]] = {\n    val kmeans = new KMeans().setK(3).setFeaturesCol(\"scaled_features\")\n    val model = kmeans.fit(table)\n    val modelData = model.getModelData()(0)\n    val iter = modelData.execute().collect()\n    val centers = scala.collection.mutable.ArrayBuffer[Array[Double]]()\n    while (iter.hasNext) {\n      val row = iter.next()\n      val vectors = row.getField(0).asInstanceOf[Array[DenseVector]]\n      vectors.foreach(v =&gt; centers += v.toArray)\n    }\n    centers.toArray\n  }\n}\n\n\npackage com.flinkfraud.job\nimport scala.collection.JavaConverters._\nimport com.flinkfraud.config.JobConfig\nimport com.flinkfraud.model.{Transaction, FeatureScaler}\nimport com.flinkfraud.parser.TransactionParser\nimport com.flinkfraud.fraud.WindowFraudCollector\n\nimport org.apache.flink.api.common.serialization.SimpleStringSchema\nimport org.apache.flink.api.common.eventtime.WatermarkStrategy\nimport org.apache.flink.api.common.typeinfo.TypeInformation\nimport org.apache.flink.connector.kafka.source.KafkaSource\nimport org.apache.flink.connector.kafka.sink.{KafkaRecordSerializationSchema, KafkaSink}\nimport org.apache.flink.connector.base.DeliveryGuarantee\nimport org.apache.flink.streaming.api.scala._\nimport org.apache.flink.streaming.api.windowing.time.Time\nimport org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows\n\n/**\n  * Flink streaming:\n  *  - Detecting transactions with high probability of fraud\n  *  - Counting incoming messages\n  */\nobject FlinkStreamingJob {\n\n  def main(args: Array[String]): Unit = {\n    val env = StreamExecutionEnvironment.getExecutionEnvironment\n    env.setParallelism(1)\n\n    val config = JobConfig.load()\n\n    val centers = scala.io.Source\n      .fromFile(config.modelCentersPath)\n      .getLines()\n      .map(_.split(\",\").map(_.toDouble))\n      .toArray\n\n    val scaler = FeatureScaler.load(config.scalerPath)\n\n    implicit val stringTypeInfo: TypeInformation[String] = TypeInformation.of(classOf[String])\n    val source = KafkaSource.builder[String]()\n      .setBootstrapServers(config.kafkaBootstrap)\n      .setTopics(config.kafkaTopics.asJava)\n      .setGroupId(\"flink-fraud-detector\")\n      .setValueOnlyDeserializer(new SimpleStringSchema())\n      .build()\n\n    val inputStream: DataStream[String] =\n      env.fromSource(source, WatermarkStrategy.noWatermarks[String](), \"KafkaSource\")(stringTypeInfo)\n\n    val sinkFraud = KafkaSink.builder[String]()\n      .setBootstrapServers(config.kafkaBootstrap)\n      .setRecordSerializer(\n        KafkaRecordSerializationSchema.builder()\n          .setTopic(config.kafkaFraudTopic)\n          .setValueSerializationSchema(new SimpleStringSchema())\n          .build()\n      )\n      .setDeliverGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)\n      .build()\n\n    val sinkCount = KafkaSink.builder[String]()\n      .setBootstrapServers(config.kafkaBootstrap)\n      .setRecordSerializer(\n        KafkaRecordSerializationSchema.builder()\n          .setTopic(config.kafkaCountTopic)\n          .setValueSerializationSchema(new SimpleStringSchema())\n          .build()\n      )\n      .setDeliverGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)\n      .build()\n\n    implicit val intTypeInfo: TypeInformation[Int] = TypeInformation.of(classOf[Int])\n    inputStream\n      .map(_ =&gt; 1)\n       .windowAll(TumblingProcessingTimeWindows.of(Time.minutes(5))\n        .asInstanceOf[org.apache.flink.streaming.api.windowing.assigners.WindowAssigner[_ &gt;: Int, org.apache.flink.streaming.api.windowing.windows.TimeWindow]])\n      .reduce(_ + _)\n      .map(_.toString)\n      .sinkTo(sinkCount)\n\n    val transactionStream = inputStream\n      .filter(_.contains(\"Zakupiono diament\"))\n      .map(new TransactionParser)\n\n    val fraudCollector = new WindowFraudCollector(\n      centers,\n      scaler,\n      config.threshold,\n      config.logPath\n    )\n\n    transactionStream\n      .assignTimestampsAndWatermarks(WatermarkStrategy.noWatermarks[Transaction]())\n      .windowAll(TumblingProcessingTimeWindows.of(Time.minutes(4)))\n      .process(fraudCollector)\n      .sinkTo(sinkFraud)\n\n    env.execute(\"Flink Fraud Detection Job\")\n  }\n}\n\nsbt clean compile assembly && \\\nflink run -c com.flinkmodel.job.TrainModelJob /opt/flink_job/target/scala-2.12/flinkscalajob-uber.jar && \\\nflink run -c com.flinkfraud.job.FlinkStreamingJob /opt/flink_job/target/scala-2.12/flinkscalajob-uber.jar",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Implementing messeges counter and KMEANS model in a Kafka Stream using Scala - Flink ML"
+    ]
+  },
+  {
+    "objectID": "index.html#welcome-to-my-portfolio-page",
+    "href": "index.html#welcome-to-my-portfolio-page",
+    "title": "Main page - portfolio",
+    "section": "",
+    "text": "Individual articles are divided into sections\nIf you have any questions, please contact me"
+  }
+]
