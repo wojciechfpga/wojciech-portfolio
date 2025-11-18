@@ -1,0 +1,549 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "---\n",
+        "title: \"Scalability and data replication in Kafka - testing the resilience of a Kafka cluster to broker host failures. Cassandra and Kafka Connect basics\"\n",
+        "author: \"Wojciech L.\"\n",
+        "format: html\n",
+        "editor: visual\n",
+        "---\n",
+        "\n",
+        "## Intorduction\n",
+        "\n",
+        "The purpose of this paper is to evaluate the Kafka Messaging Broker in terms of its two advantages: scalability and resilience to broker instance failures. These are the main advantages of Kafka, which make it more efficient and easier to implement than brokers such as RabbitMQ or ActiveMQ.\n",
+        "\n",
+        "To achieve this, a container cluster was created in Docker-Compose, containing: - Generator - Kafka broker - three hosts with three instances - Kafka Connect - Cassandra Sink - Cassandra database - Host with Redis cache (only for Kafka performance verification)\n",
+        "\n",
+        "It works by broadcasting messages from a generator, which are then sent to Kafka Connect via Kafka and written to the Cassandra database. For later verification, the generated messages are simultaneously written to the host running Redis.\n",
+        "\n",
+        "Sustainability verification involves running a .sh script that starts the cluster and then shuts down one of the brokers. After broadcasting, the number of messages in Redis will be compared with the number of messages in Cassandra. Additionally, load tests will be conducted to demonstrate Kafka's horizontal scaling, with the loggers handling individual partitions under hardware load while broadcasting messages to a topic.\n",
+        "\n",
+        "The cluster code is located in the following repository:\n",
+        "\n",
+        "[GitHub Repo](https://github.com/wojciechfpga/kafka_scalability)\n",
+        "\n",
+        "## 1. Demonstration project\n",
+        "\n",
+        "To verify Kafka's fault tolerance and scalability, a cluster of hosts must be developed, which includes a data generator that writes messages to a Kafka topic and to Redis. Another element is at least three Kafka brokers to establish quorum to determine whether messages in a topic are valid after the loss of one host. A Zookeeper metadata server, although this can be replaced by an additional controller function on one or more hosts, and Kafka Connect to receive messages from a Kafka topic and write them to Cassandra. A diagram of this message flow is shown below:\n",
+        "\n",
+        "![Picture 1. Project of Data Architectur](KafkaSostatnie.png) Below is a shortened code in docker-compose that implements the above architecture in a cluster."
+      ],
+      "id": "912f7382"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "services:\n",
+        "  generator_transaction:\n",
+        "    build: ./generator_transactions\n",
+        "    command: bash -c \"bash begin.sh || true; tail -f /dev/null\"\n",
+        "    volumes:\n",
+        "      - ./generator_transactions:/app\n",
+        "    depends_on:\n",
+        "          ...\n",
+        "  cassandra-db:\n",
+        "    image: cassandra:latest\n",
+        "    ports:\n",
+        "      - 9042:9042\n",
+        "    environment:\n",
+        "      ...\n",
+        "    #volumes:\n",
+        "      #- cassandra_data:/var/lib/cassandra\n",
+        "    healthcheck:\n",
+        "          ...\n",
+        "\n",
+        "  cassandradb-connect:\n",
+        "    build: ./connector\n",
+        "    ports:\n",
+        "      - 8083:8083\n",
+        "    environment:\n",
+        "      ...\n",
+        "    depends_on:\n",
+        "      - broker-1\n",
+        "      - cassandra-db\n",
+        "    healthcheck:\n",
+        "      ...\n",
+        "\n",
+        "  broker-1:\n",
+        "    image: apache/kafka:latest\n",
+        "    container_name: broker-1\n",
+        "    ports:\n",
+        "      - 29092:9092\n",
+        "    environment:\n",
+        "      ...\n",
+        "    healthcheck:\n",
+        "      ...\n",
+        "\n",
+        "  broker-2:\n",
+        "    image: apache/kafka:latest\n",
+        "    container_name: broker-2\n",
+        "    ports:\n",
+        "      - 39092:9092\n",
+        "    environment:\n",
+        "      ...\n",
+        "    depends_on:\n",
+        "          broker-1:\n",
+        "            condition: service_healthy\n",
+        "\n",
+        "  broker-3:\n",
+        "    image: apache/kafka:latest\n",
+        "    container_name: broker-3\n",
+        "    ports:\n",
+        "      - 49092:9092\n",
+        "    environment:\n",
+        "     ...\n",
+        "    depends_on:\n",
+        "          broker-1:\n",
+        "            condition: service_healthy\n",
+        "\n",
+        "  redis:\n",
+        "    image: redis:7\n",
+        "    container_name: redis\n",
+        "    ports:\n",
+        "      - \"6379:6379\"\n",
+        "    command: [\"redis-server\", \"--save\", \"\", \"--appendonly\", \"no\"] \n",
+        "    healthcheck:\n",
+        "      ...\n",
+        "\n",
+        "#volumes:\n",
+        " # cassandra_data:"
+      ],
+      "id": "81b534cd",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "The above cluster can be started with the cluster.sh script, which also shuts down one of the Kafka brokers to verify fault tolerance."
+      ],
+      "id": "f2bd6e78"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "echo \"Starting the cluster...\"\n",
+        "docker-compose up --build -d\n",
+        "\n",
+        "echo \"Waiting for the generator_transaction container to start...\"\n",
+        "\n",
+        "while true; do\n",
+        "  STATUS=$(docker inspect -f '{{.State.Running}}' $(docker-compose ps -q generator_transaction) 2>/dev/null)\n",
+        "  if [ \"$STATUS\" == \"true\" ]; then\n",
+        "    echo \"The generator_transaction container is running.\"\n",
+        "    break\n",
+        "  fi\n",
+        "  sleep 2\n",
+        "done\n",
+        "\n",
+        "echo \"Waiting for 50 seconds...\"\n",
+        "sleep 50\n",
+        "\n",
+        "echo \"Forcefully stopping the broker-2 container...\"\n",
+        "docker kill $(docker-compose ps -q broker-2)\n",
+        "\n",
+        "echo \"Done.\""
+      ],
+      "id": "3bba4eeb",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "### 1.1. Generator/comparator host\n",
+        "\n",
+        "The generator container contains several Python scripts, including the begin.sh script, which runs the message. The purpose of each script is to prepare the remaining components to accept messages and start the message generation process.\n",
+        "\n",
+        "### 1.2. Kafka Connect - Cassandra sink host\n",
+        "\n",
+        "One necessary process is configuring Kafka Connect to work with Kafka brokers and the Cassandra database. This is accomplished by sending configuration JSON to the appropriate URL. The sent configuration JSON is shown below:"
+      ],
+      "id": "e5718086"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "{\n",
+        "  \"name\": \"cassandra-sink-connector\",\n",
+        "  \"config\": {\n",
+        "    \"connector.class\": \"io.confluent.connect.cassandra.CassandraSinkConnector\",\n",
+        "    \"tasks.max\": \"1\",\n",
+        "    \"topics\": \"transactions\",\n",
+        "    \"cassandra.contact.points\": \"cassandra-db\",\n",
+        "    \"cassandra.port\": \"9042\",\n",
+        "    \"cassandra.keyspace\": \"transactions_ks\",\n",
+        "    \"cassandra.local.datacenter\": \"DC1\",\n",
+        "    \"cassandra.consistency.level\": \"LOCAL_ONE\",\n",
+        "    \"cassandra.username\": \"\",\n",
+        "    \"cassandra.password\": \"\",\n",
+        "    \"key.converter\": \"org.apache.kafka.connect.json.JsonConverter\",\n",
+        "    \"key.converter.schemas.enable\": \"false\",\n",
+        "    \"value.converter\": \"org.apache.kafka.connect.json.JsonConverter\",\n",
+        "    \"value.converter.schemas.enable\": \"false\",\n",
+        "    \"cassandra.table.name.format\": \"${topic}\",\n",
+        "    \"insert.mode\": \"insert\",\n",
+        "    \"confluent.topic.bootstrap.servers\": \"broker-1:19092,broker-2:19092,broker-3:19092\"\n",
+        "  }\n",
+        "}"
+      ],
+      "id": "196aee3f",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 2. Kafka Scalability - Multiple Partitions and Brokers\n",
+        "\n",
+        "To demonstrate Kafka's scalability - handling different partitions of a given topic by different hosts - you need to properly configure the topic to which messages will be sent and set, for example, three partitions."
+      ],
+      "id": "690fac8c"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "from kafka.admin import KafkaAdminClient, NewTopic\n",
+        "from datetime import datetime\n",
+        "\n",
+        "admin_client = KafkaAdminClient(\n",
+        "    bootstrap_servers = \"broker-1:19092,broker-2:19092,broker-3:19092\",\n",
+        "    client_id = \"admin_config\"\n",
+        ")\n",
+        "\n",
+        "topic = NewTopic(\n",
+        "    name = \"transactions\",\n",
+        "    num_partitions=3,\n",
+        "    replication_factor=3  \n",
+        ")\n",
+        "\n",
+        "admin_client.create_topics(new_topics=[topic], validate_only=False)\n",
+        "now = datetime.now()\n",
+        "print(f\"Kafka Topic created {now}\")"
+      ],
+      "id": "afa1aac6",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Next, it is necessary to develop the Kafka producer code that sends messages to the previously created topic."
+      ],
+      "id": "2c473f08"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "from kafka import KafkaProducer\n",
+        "import redis\n",
+        "import json, time, uuid, random, datetime\n",
+        "\n",
+        "producer = KafkaProducer(\n",
+        "    bootstrap_servers=\"broker-1:19092,broker-2:19092,broker-3:19092\",\n",
+        "    value_serializer=lambda v: json.dumps(v, default=str).encode(\"utf-8\"),\n",
+        "    acks='all', \n",
+        "    retries=5\n",
+        ")\n",
+        "\n",
+        "r = redis.Redis(host='redis', port=6379, db=0)\n",
+        "\n",
+        "start_time = time.time()\n",
+        "duration = 120\n",
+        "counter = 0\n",
+        "\n",
+        "while time.time() - start_time < duration:\n",
+        "    now = datetime.datetime.now(datetime.timezone.utc)\n",
+        "    print(f\"Sending begin at {now}\")\n",
+        "    msg = {\n",
+        "        \"transaction_id\": str(uuid.uuid4()),\n",
+        "        \"user_id\": f\"user_{random.randint(1,100)}\",\n",
+        "        \"amount\": round(random.uniform(10.0, 500.0), 2),\n",
+        "        \"timestamp\": int(now.timestamp() * 1000)\n",
+        "    }\n",
+        "\n",
+        "    future = producer.send(\n",
+        "        \"transactions\",\n",
+        "        key=json.dumps({\"transaction_id\": msg[\"transaction_id\"]}).encode(\"utf-8\"),\n",
+        "        value=msg\n",
+        "    )\n",
+        "\n",
+        "    try:\n",
+        "        record_metadata = future.get(timeout=20)\n",
+        "        r.set(msg[\"transaction_id\"], json.dumps(msg))\n",
+        "        counter += 1\n",
+        "        print(f\"[{counter}] Sent and stored:\", msg)\n",
+        "    except Exception as e:\n",
+        "        print(\"Error sending to Kafka:\", e)\n",
+        "\n",
+        "    time.sleep(0.0001)\n",
+        "\n",
+        "producer.flush()\n",
+        "producer.close()\n",
+        "print(\"End\")"
+      ],
+      "id": "41279b07",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "With the data architecture cluster elements already in place, you can see how—despite creating a single topic with three partitions—the load is distributed across three hosts serving the topic in three partitions. The figure below clearly shows that the hosts with brokers handling partitions and replicas are under heavy load, demonstrating that horizontal scalability has been achieved in Kafka.\n",
+        "\n",
+        "![Picture 2. Scalability of Kafka](KafkaS1.png)\n",
+        "\n",
+        "## 3. Broker fault tolerance - data replicas across multiple brokers\n",
+        "\n",
+        "The purpose of this chapter is to demonstrate Kafka's resilience to broker failures through its replication mechanism. This replication mechanism is ensured by a proper declaration when creating a topic, as seen in the following code:"
+      ],
+      "id": "d47094a9"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "topic = NewTopic(\n",
+        "    name = \"transactions\",\n",
+        "    num_partitions=3,\n",
+        "    replication_factor=3  \n",
+        ")"
+      ],
+      "id": "b9c24f0c",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Once the cluster is up and running, one of the brokers—broker-2—can be forcibly shut down, simulating a server failure. This will result in a series of logs appearing on other Kafka brokers, indicating the event.\n",
+        "\n",
+        "The most important ones are listed below.\n",
+        "\n",
+        "The first exception thrown is when broker-1 loses connection to broker-2:"
+      ],
+      "id": "b9606dce"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "java.io.IOException: Connection to broker-2:19092 (id: 2 rack: null isFenced: false) failed."
+      ],
+      "id": "554ba6dc",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Then the connection closure is confirmed:"
+      ],
+      "id": "62d9848b"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "Client requested connection close from node 2 (org.apache.kafka.clients.NetworkClient)"
+      ],
+      "id": "7e83c5d1",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "To ensure data replication, broker-1 sends fetch request messages to broker-2. In this case, the client reports an error that it is not sending a fetch request to receive data for replication because broker-2 is no longer available."
+      ],
+      "id": "456ea32d"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "Error sending fetch request (sessionId=700883982, epoch=INITIAL) to node 2:"
+      ],
+      "id": "23d730a2",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "The next log indicates that broker-1 stopped fetching data from broker-2. The fact that broker-1 was fetching data and then stopped doing so indicates that broker-2, which was shut down, was the partition leader."
+      ],
+      "id": "43e81296"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "Removed fetcher for partitions Set(_confluent-command-0, transactions-0)"
+      ],
+      "id": "0fb92f88",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Next, a new partition leader is elected, from which other brokers with partition replicas will fetch data for replication. Broker-3 was chosen as the new leader, and fetch requests will be sent to it for partition replication."
+      ],
+      "id": "3c8612cd"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "Added fetcher to broker 3 for partitions HashMap(transactions-1 -> InitialFetchState(... BrokerEndPoint(id=3, host=broker-3:19092),1,157))"
+      ],
+      "id": "3a445aac",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Then, a confirmation is received in the logs that the process responsible for data replication from broker-2 has been closed - so as not to try to download data from broker-2, which is not available."
+      ],
+      "id": "78064827"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "ReplicaFetcherThread-0-2: Shutting down ... Shutdown completed"
+      ],
+      "id": "579ce3a2",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Next, the number of messages written to Redis and stored in Cassandra is verified. It's clear that the numbers match. This means that despite a broker failure, all messages were delivered to Kafka Connect and stored in Cassandra. The figure below shows sample data stored in Cassandra - in DbVisualizer.\n",
+        "\n",
+        "![Picture 3. DbVisualizer with data from Cassandra](KafkaS3.png)\n",
+        "\n",
+        "In order to verify the amount of data stored in Redis and Cassandra, a special Python script was developed, as shown below:"
+      ],
+      "id": "66295a2e"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| eval: false\n",
+        "#| include: true\n",
+        "from cassandra.cluster import Cluster\n",
+        "import redis, json\n",
+        "\n",
+        "cluster = Cluster(['cassandra-db'])\n",
+        "session = cluster.connect('transactions_ks')\n",
+        "\n",
+        "r = redis.Redis(host='redis', port=6379, db=0)\n",
+        "\n",
+        "\n",
+        "keys = r.keys('*')\n",
+        "redis_data = {k.decode(): json.loads(r.get(k)) for k in keys}\n",
+        "\n",
+        "rows = session.execute(\"SELECT transaction_id, user_id, amount, timestamp FROM transactions\")\n",
+        "cassandra_data = {row.transaction_id: {\n",
+        "    \"transaction_id\": row.transaction_id,\n",
+        "    \"user_id\": row.user_id,\n",
+        "    \"amount\": row.amount,\n",
+        "    \"timestamp\": row.timestamp\n",
+        "} for row in rows}\n",
+        "\n",
+        "missing_in_cassandra = set(redis_data.keys()) - set(cassandra_data.keys())\n",
+        "missing_in_redis = set(cassandra_data.keys()) - set(redis_data.keys())\n",
+        "\n",
+        "print(f\"Redis total: {len(redis_data)}\")\n",
+        "print(f\"Cassandra total: {len(cassandra_data)}\")\n",
+        "print(f\"Missing in Cassandra: {len(missing_in_cassandra)}\")\n",
+        "print(f\"Missing in Redis: {len(missing_in_redis)}\")\n",
+        "\n",
+        "if missing_in_cassandra:\n",
+        "    print(\"Not in Cassandra:\", list(missing_in_cassandra)[:10])\n",
+        "else:\n",
+        "    print(\"All messages persisted successfully!\")"
+      ],
+      "id": "065d4bee",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "The screenshot below shows that the script executed correctly and the data in Redi and Cassandra matches, confirming that all messages reached Kafka Connect despite the broker failure.\n",
+        "\n",
+        "![Picture 4. Results of comparassion](KafkaS2.png)\n",
+        "\n",
+        "## 4. Summary\n",
+        "\n",
+        "Creating a topic with multiple partitions enabled us to leverage one of Kafka's greatest advantages: scalability. Including a large message stream in a topic with three partitions resulted in a strong and even load on all three hosts with Kafka brokers.\n",
+        "\n",
+        "A sudden interruption of the broker—serving a specific partition—did not result in message loss thanks to the replication mechanism, which should be specified when declaring the Kafka topic.\n",
+        "\n",
+        "Kafka met the requirements, but if the number of hosts in the cluster is limited, consider using inter-cluster Kafka replication, such as Mirror Maker 2."
+      ],
+      "id": "798b79b0"
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "python3",
+      "language": "python",
+      "display_name": "Python 3 (ipykernel)",
+      "path": "C:\\Python312\\share\\jupyter\\kernels\\python3"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 5
+}

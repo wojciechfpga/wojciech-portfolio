@@ -1,0 +1,50 @@
+{
+  "index.qmd": {
+    "index.html": "4023ab9b"
+  },
+  "about.qmd": {
+    "about.html": "c6292f35"
+  },
+  "wl-tune-bayes-parallel.qmd": {
+    "wl-tune-bayes-parallel.html": "55ff5444"
+  },
+  "wl-infer-4.qmd": {
+    "wl-infer-4.html": "e3f6bcc6"
+  },
+  "vip_end.qmd": {
+    "vip_end.html": "60d83779"
+  },
+  "wl-clustering-infer-2.qmd": {
+    "wl-clustering-infer-2.html": "a1e236e1"
+  },
+  "wl-fe.qmd": {
+    "wl-fe.html": "329b2f1f"
+  },
+  "cu_color_v5.qmd": {
+    "cu_color_v5.html": "b421e4c3"
+  },
+  "msfabric_v2.qmd": {
+    "msfabric_v2.html": "a87437e3"
+  },
+  "quakes_v7.qmd": {
+    "quakes_v7.html": "38a8c81c"
+  },
+  "KafkaFabric_v1.qmd": {
+    "KafkaFabric_v1.html": "050ff26d"
+  },
+  "Kafka_Scalability.qmd": {
+    "Kafka_Scalability.html": "acf10b19"
+  },
+  "kappa_v1.qmd": {
+    "kappa_v1.html": "ac497fb2"
+  },
+  "KMEANS_FLINK.qmd": {
+    "KMEANS_FLINK.html": "69723021"
+  },
+  "lakehouse_v1.qmd": {
+    "lakehouse_v1.html": "a74fe56e"
+  },
+  "Kmeanflinkv1.qmd": {
+    "Kmeanflinkv1.html": "27851f80"
+  }
+}
