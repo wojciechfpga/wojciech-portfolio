@@ -344,7 +344,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <p>The data architecture discussed in the introduction is presented in the figure below:</p>
 <p><img src="end1.png" class="img-fluid" alt="Picture 1. Project of Data Architectur"> It’s worth noting that some components contain more than one host. For example, Flink requires a client to generate a job graph, a jobmanager to manage clusters, and a taskmanager to execute tasks—all on separate hosts within the cluster.</p>
 <p>Below is a shorthand version of the code implementing the architecture in Docker-Compose:</p>
-<div id="2ec25a47" class="cell" data-execution_count="1">
+<div id="2eb9709c" class="cell" data-execution_count="1">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>services:</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  message<span class="op">-</span>generator:</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    build: .<span class="op">/</span>message<span class="op">-</span>generator</span>
@@ -402,7 +402,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h2 class="anchored" data-anchor-id="data-generator">2. Data generator</h2>
 <p>The main task of the data generator is to generate diamond parameters, its base price (based on the Diamonds dataset from Seaborn/ggplot2), and its sales volume. This data is saved to the appropriate Kafka topic. Before the message generation process begins, a Kafka broker is configured and the topic is created.</p>
 <p>Below is the most important part of the generator code:</p>
-<div id="c1346fe5" class="cell" data-execution_count="2">
+<div id="7dd5a0a1" class="cell" data-execution_count="2">
 <div class="sourceCode cell-code" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> time</span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> data_generator <span class="im">import</span> diamond_data_generator</span>
 <span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> producer <span class="im">import</span> send_diamond_event, close_producer</span>
@@ -438,24 +438,24 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <section id="flink" class="level2">
 <h2 class="anchored" data-anchor-id="flink">4. Flink</h2>
 <p>Flink’s main task is to calculate the market value of a diamond based on its sales volume. To accomplish this, a DataStream object was created based on the Kafka Source with a topic from the data generator. Then, using mapping and a function call, a modified DataStream object was created, which was then written to the appropriate Kafka topic using the Flink Kafka Sink. This is demonstrated in the following code:</p>
-<div id="6fcc4147" class="cell" data-execution_count="3">
+<div id="349892ee" class="cell" data-execution_count="3">
 <div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="bu">object</span> FlinkDiamondJob {</span>
 <span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="kw">def</span> main(args: Array[String]): Unit <span class="op">=</span> {</span>
 <span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    val env <span class="op">=</span> StreamExecutionEnvironment.getExecutionEnvironment</span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">//</span> env.setParallelism(<span class="dv">1</span>) </span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">//</span> env.setParallelism(<span class="dv">1</span>)</span>
 <span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    val source <span class="op">=</span> KafkaSource.builder[Diamond]()</span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>      .setBootstrapServers(adressBroker)</span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>      .setTopics(inputTopic)</span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>      .setGroupId(idOfInputGroup)</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>      .setBootstrapServers(JobConstants.Kafka.BootstrapServers)</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>      .setTopics(JobConstants.Kafka.InputTopic)</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>      .setGroupId(JobConstants.Kafka.GroupId)</span>
 <span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>      .setStartingOffsets(OffsetsInitializer.latest())</span>
-<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>      .setValueOnlyDeserializer(new DiamondAvroDeserializer(schemaRegistryUrl))</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>      .setValueOnlyDeserializer(new DiamondAvroDeserializer(JobConstants.SchemaRegistry.Url))</span>
 <span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>      .build()</span>
 <span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>    val inputStream: DataStream[Diamond] <span class="op">=</span> env.fromSource(</span>
 <span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>      source,</span>
 <span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>      WatermarkStrategy.noWatermarks[Diamond](),</span>
-<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>      <span class="st">"kafka-source-diamonds"</span></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>      JobConstants.FlinkOps.SourceName</span>
 <span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>    )</span>
 <span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>    implicit val avroTypeInfo: TypeInformation[GenericRecord] <span class="op">=</span> </span>
@@ -467,24 +467,24 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>        val score <span class="op">=</span> DiamondPriceTreePredictor.predict(pre)</span>
 <span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>        val record <span class="op">=</span> new GenericData.Record(OutputSchema.DiamondScore)</span>
-<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>        record.put(<span class="st">"id"</span>, diamond.<span class="bu">id</span>)</span>
-<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>        record.put(<span class="st">"price"</span>, diamond.price)</span>
-<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>        record.put(<span class="st">"calculated_score"</span>, score)</span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>        record.put(JobConstants.FieldNames.Id, diamond.<span class="bu">id</span>)</span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>        record.put(JobConstants.FieldNames.Price, diamond.price)</span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>        record.put(JobConstants.FieldNames.CalculatedScore, score)</span>
 <span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>        </span>
 <span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>        record.asInstanceOf[GenericRecord] </span>
 <span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a>      } </span>
-<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>      .name(kafkaOutStreamName)</span>
+<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>      .name(JobConstants.FlinkOps.TransformationName)</span>
 <span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a>    val sink: KafkaSink[GenericRecord] <span class="op">=</span> KafkaSink.builder[GenericRecord]()</span>
-<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a>      .setBootstrapServers(adressBroker)</span>
+<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a>      .setBootstrapServers(JobConstants.Kafka.BootstrapServers)</span>
 <span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a>      .setRecordSerializer(</span>
 <span id="cb3-40"><a href="#cb3-40" aria-hidden="true" tabindex="-1"></a>        KafkaRecordSerializationSchema.builder[GenericRecord]()</span>
-<span id="cb3-41"><a href="#cb3-41" aria-hidden="true" tabindex="-1"></a>          .setTopic(outputTopic)</span>
+<span id="cb3-41"><a href="#cb3-41" aria-hidden="true" tabindex="-1"></a>          .setTopic(JobConstants.Kafka.OutputTopic)</span>
 <span id="cb3-42"><a href="#cb3-42" aria-hidden="true" tabindex="-1"></a>          .setValueSerializationSchema(</span>
 <span id="cb3-43"><a href="#cb3-43" aria-hidden="true" tabindex="-1"></a>            ConfluentRegistryAvroSerializationSchema.forGeneric(</span>
-<span id="cb3-44"><a href="#cb3-44" aria-hidden="true" tabindex="-1"></a>              s<span class="st">"$outputTopic-value"</span>,</span>
+<span id="cb3-44"><a href="#cb3-44" aria-hidden="true" tabindex="-1"></a>              s<span class="st">"$</span><span class="sc">{JobConstants.Kafka.OutputTopic}</span><span class="st">-value"</span>, </span>
 <span id="cb3-45"><a href="#cb3-45" aria-hidden="true" tabindex="-1"></a>              OutputSchema.DiamondScore,</span>
-<span id="cb3-46"><a href="#cb3-46" aria-hidden="true" tabindex="-1"></a>              schemaRegistryUrl</span>
+<span id="cb3-46"><a href="#cb3-46" aria-hidden="true" tabindex="-1"></a>              JobConstants.SchemaRegistry.Url</span>
 <span id="cb3-47"><a href="#cb3-47" aria-hidden="true" tabindex="-1"></a>            )</span>
 <span id="cb3-48"><a href="#cb3-48" aria-hidden="true" tabindex="-1"></a>          )</span>
 <span id="cb3-49"><a href="#cb3-49" aria-hidden="true" tabindex="-1"></a>          .build()</span>
@@ -493,9 +493,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb3-52"><a href="#cb3-52" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb3-53"><a href="#cb3-53" aria-hidden="true" tabindex="-1"></a>    outputStream</span>
 <span id="cb3-54"><a href="#cb3-54" aria-hidden="true" tabindex="-1"></a>      .sinkTo(sink)</span>
-<span id="cb3-55"><a href="#cb3-55" aria-hidden="true" tabindex="-1"></a>      .name(kafkaSinkName)</span>
+<span id="cb3-55"><a href="#cb3-55" aria-hidden="true" tabindex="-1"></a>      .name(JobConstants.FlinkOps.SinkName)</span>
 <span id="cb3-56"><a href="#cb3-56" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-57"><a href="#cb3-57" aria-hidden="true" tabindex="-1"></a>    env.execute(<span class="st">"Flink Diamond Price Prediction Job"</span>)</span>
+<span id="cb3-57"><a href="#cb3-57" aria-hidden="true" tabindex="-1"></a>    env.execute(JobConstants.FlinkOps.JobName)</span>
 <span id="cb3-58"><a href="#cb3-58" aria-hidden="true" tabindex="-1"></a>  }</span>
 <span id="cb3-59"><a href="#cb3-59" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
@@ -506,7 +506,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <section id="kafka-connect---redis-sink" class="level2">
 <h2 class="anchored" data-anchor-id="kafka-connect---redis-sink">5. Kafka Connect - Redis Sink</h2>
 <p>Kafka Connect is used to write data from a Kafka topic to Redis. For it to work correctly, an HTTP POST message with the following dictionary (as JSON) attached must be sent to the appropriate URL (specifying the port and URI):</p>
-<div id="9eb8bc37" class="cell" data-execution_count="4">
+<div id="5dce69a0" class="cell" data-execution_count="4">
 <div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>payload <span class="op">=</span> {</span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">"name"</span>: CONNECTOR_NAME,</span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"config"</span>: {</span>
@@ -528,7 +528,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>The container containing the Kafka Connect - Redis Sink is created based on the following Dockerfile:</p>
-<div id="599e963c" class="cell" data-execution_count="5">
+<div id="c871ab0c" class="cell" data-execution_count="5">
 <div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>FROM confluentinc<span class="op">/</span>cp<span class="op">-</span>kafka<span class="op">-</span><span class="ex">connect</span>:latest</span>
 <span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>RUN confluent<span class="op">-</span>hub install <span class="op">--</span>no<span class="op">-</span>prompt redis<span class="op">/</span>redis<span class="op">-</span>kafka<span class="op">-</span><span class="ex">connect</span>:latest</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
@@ -557,7 +557,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </figure>
 </div>
 <p>Main app code is belowe:</p>
-<div id="bca2c4e8" class="cell" data-execution_count="6">
+<div id="44bd52db" class="cell" data-execution_count="6">
 <div class="sourceCode cell-code" id="cb6"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> config.settings <span class="im">import</span> setup_page</span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> dashboard.layout <span class="im">import</span> render_sidebar</span>
 <span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> dashboard.live_dashboard <span class="im">import</span> render_live_dashboard</span>
@@ -569,7 +569,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>render_live_dashboard()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>It is clearly visible that the application consists of three modules that run one after the other. Most important is call the dashboard:</p>
-<div id="8795ba3e" class="cell" data-execution_count="7">
+<div id="1c0f29bc" class="cell" data-execution_count="7">
 <div class="sourceCode cell-code" id="cb7"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> time</span>
 <span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
 <span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> streamlit <span class="im">as</span> st</span>
