@@ -11,7 +11,7 @@
         "editor: visual\n",
         "---"
       ],
-      "id": "09357b6a"
+      "id": "9e7b0f11"
     },
     {
       "cell_type": "code",
@@ -167,7 +167,7 @@
         "  kafka-net:\n",
         "    name: kafka-net"
       ],
-      "id": "90433c40",
+      "id": "8fc4d906",
       "execution_count": null,
       "outputs": []
     },
@@ -211,7 +211,7 @@
         "  }\n",
         "}"
       ],
-      "id": "37781975",
+      "id": "c41312d7",
       "execution_count": null,
       "outputs": []
     },
@@ -242,7 +242,7 @@
         "  }\n",
         "}"
       ],
-      "id": "6e5b2c60",
+      "id": "646c7b6f",
       "execution_count": null,
       "outputs": []
     },
@@ -353,7 +353,7 @@
         "  }\n",
         "}"
       ],
-      "id": "ed407948",
+      "id": "7ff9d8a1",
       "execution_count": null,
       "outputs": []
     },
@@ -368,7 +368,7 @@
         "\n",
         "```\n"
       ],
-      "id": "d398bca7"
+      "id": "9dd0818d"
     }
   ],
   "metadata": {
@@ -376,7 +376,7 @@
       "name": "python3",
       "language": "python",
       "display_name": "Python 3 (ipykernel)",
-      "path": "C:\\Python312\\share\\jupyter\\kernels\\python3"
+      "path": "C:\\Users\\Wojci\\AppData\\Local\\R\\cache\\R\\reticulate\\uv\\cache\\archive-v0\\OFvl4FO9H3d81VF8b03zh\\share\\jupyter\\kernels\\python3"
     }
   },
   "nbformat": 4,

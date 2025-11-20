@@ -350,7 +350,6 @@ augmented_data_denorm_price <- augmented_data %>%
   mutate(price = diamonds$price)
 ```
 
-
 ```{r}
 augmented_data_summary_price <- augmented_data_denorm_price %>%
   select(price, .pred_cluster) %>%
@@ -499,12 +498,11 @@ It should be noted that the two hypotheses adopted were confirmed by the analysi
 
 ### Conclusions from a diamond shop's point of view
 
-
 The above analysis proved that dividing diamonds by color and price is possible, and thanks to the resulting model, it is possible to automate the cluster assignment process. This allows for the optimization of the number of diamond shelves and their arrangement when delivering new diamonds to a jewelry store.
 
 The dataset was divided into four price categories. Dividing the diamonds into more price categories would not have provided much order, and merely separating diamonds into more than four categories would have been labor-intensive and would have yielded little. Furthermore, the goal of the analysis was achieved – it is known that different colors dominate in each price category, so the display can be adjusted. Therefore:
 
-- Diamonds from cluster one should have a display that well highlights colors G and E – appropriate shelves and other display materials must be ordered.
-- Diamonds from cluster two should have a display that well highlights color E.
-- Diamonds from cluster three should have a display that well highlights colors F, G, and H.
-- Diamonds from cluster four should have a display that well highlights colors G, H, and I.
+-   Diamonds from cluster one should have a display that well highlights colors G and E – appropriate shelves and other display materials must be ordered.
+-   Diamonds from cluster two should have a display that well highlights color E.
+-   Diamonds from cluster three should have a display that well highlights colors F, G, and H.
+-   Diamonds from cluster four should have a display that well highlights colors G, H, and I.

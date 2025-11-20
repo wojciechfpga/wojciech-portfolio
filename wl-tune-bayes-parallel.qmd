@@ -36,11 +36,9 @@ At first we have to convert clarity to unordered factor. Second step is to divid
 
 ```{r}
 prepare_data <- function(diamonds_df) {
-  # Convert clarity to unordered factor
   diamonds_df <- diamonds_df %>%
     mutate(clarity = factor(clarity, ordered = FALSE))
-  
-  # Split data
+
   diamonds_split <- initial_split(diamonds_df, prop = 0.8, strata = clarity)
   list(
     training = training(diamonds_split),
@@ -206,7 +204,6 @@ Two calls to the final function allow us to assess whether there is a significan
 ```{r}
 #| message: false
 #| warning: false
-# Test czasu bez równoległości
 tic("Sequential RF")
 res_sequential <- calculate_clarity_rf(diamonds, future = FALSE)
 toc()
@@ -215,7 +212,6 @@ toc()
 ```{r}
 #| message: false
 #| warning: false
-# Test czasu z równoległością
 tic("Parallel RF")
 res_parallel <- calculate_clarity_rf(diamonds, future = TRUE)
 toc()
@@ -367,7 +363,6 @@ fig_cm <- fig_cm %>%
 
 ```
 
-
 ```{r}
 #| echo: false
   fig_cm
@@ -394,7 +389,6 @@ fig_roc <- plot_ly() %>%
     legend = list(title = list(text = "Class")) 
   )
 ```
-
 
 ```{r}
 #| echo: false

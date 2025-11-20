@@ -29,9 +29,11 @@
         "\n",
         "To verify Kafka's fault tolerance and scalability, a cluster of hosts must be developed, which includes a data generator that writes messages to a Kafka topic and to Redis. Another element is at least three Kafka brokers to establish quorum to determine whether messages in a topic are valid after the loss of one host. A Zookeeper metadata server, although this can be replaced by an additional controller function on one or more hosts, and Kafka Connect to receive messages from a Kafka topic and write them to Cassandra. A diagram of this message flow is shown below:\n",
         "\n",
-        "![Picture 1. Project of Data Architectur](KafkaSostatnie.png) Below is a shortened code in docker-compose that implements the above architecture in a cluster."
+        "![Picture 1. Project of Data Architectur](KafkaSostatnie.png) \n",
+        "\n",
+        "Below is a shortened code in docker-compose that implements the above architecture in a cluster."
       ],
-      "id": "912f7382"
+      "id": "de2af722"
     },
     {
       "cell_type": "code",
@@ -114,7 +116,7 @@
         "#volumes:\n",
         " # cassandra_data:"
       ],
-      "id": "81b534cd",
+      "id": "68581bb1",
       "execution_count": null,
       "outputs": []
     },
@@ -124,7 +126,7 @@
       "source": [
         "The above cluster can be started with the cluster.sh script, which also shuts down one of the Kafka brokers to verify fault tolerance."
       ],
-      "id": "f2bd6e78"
+      "id": "3f883da4"
     },
     {
       "cell_type": "code",
@@ -154,7 +156,7 @@
         "\n",
         "echo \"Done.\""
       ],
-      "id": "3bba4eeb",
+      "id": "b8e244a6",
       "execution_count": null,
       "outputs": []
     },
@@ -170,7 +172,7 @@
         "\n",
         "One necessary process is configuring Kafka Connect to work with Kafka brokers and the Cassandra database. This is accomplished by sending configuration JSON to the appropriate URL. The sent configuration JSON is shown below:"
       ],
-      "id": "e5718086"
+      "id": "169814c5"
     },
     {
       "cell_type": "code",
@@ -201,7 +203,7 @@
         "  }\n",
         "}"
       ],
-      "id": "196aee3f",
+      "id": "d6ddca59",
       "execution_count": null,
       "outputs": []
     },
@@ -213,7 +215,7 @@
         "\n",
         "To demonstrate Kafka's scalability - handling different partitions of a given topic by different hosts - you need to properly configure the topic to which messages will be sent and set, for example, three partitions."
       ],
-      "id": "690fac8c"
+      "id": "5e4bb467"
     },
     {
       "cell_type": "code",
@@ -239,7 +241,7 @@
         "now = datetime.now()\n",
         "print(f\"Kafka Topic created {now}\")"
       ],
-      "id": "afa1aac6",
+      "id": "558ed894",
       "execution_count": null,
       "outputs": []
     },
@@ -249,7 +251,7 @@
       "source": [
         "Next, it is necessary to develop the Kafka producer code that sends messages to the previously created topic."
       ],
-      "id": "2c473f08"
+      "id": "83876fd2"
     },
     {
       "cell_type": "code",
@@ -304,7 +306,7 @@
         "producer.close()\n",
         "print(\"End\")"
       ],
-      "id": "41279b07",
+      "id": "da0c28f7",
       "execution_count": null,
       "outputs": []
     },
@@ -320,7 +322,7 @@
         "\n",
         "The purpose of this chapter is to demonstrate Kafka's resilience to broker failures through its replication mechanism. This replication mechanism is ensured by a proper declaration when creating a topic, as seen in the following code:"
       ],
-      "id": "d47094a9"
+      "id": "28357647"
     },
     {
       "cell_type": "code",
@@ -334,7 +336,7 @@
         "    replication_factor=3  \n",
         ")"
       ],
-      "id": "b9c24f0c",
+      "id": "8040741b",
       "execution_count": null,
       "outputs": []
     },
@@ -348,7 +350,7 @@
         "\n",
         "The first exception thrown is when broker-1 loses connection to broker-2:"
       ],
-      "id": "b9606dce"
+      "id": "0cf64664"
     },
     {
       "cell_type": "code",
@@ -358,7 +360,7 @@
         "#| include: true\n",
         "java.io.IOException: Connection to broker-2:19092 (id: 2 rack: null isFenced: false) failed."
       ],
-      "id": "554ba6dc",
+      "id": "e8175196",
       "execution_count": null,
       "outputs": []
     },
@@ -368,7 +370,7 @@
       "source": [
         "Then the connection closure is confirmed:"
       ],
-      "id": "62d9848b"
+      "id": "e01dc76b"
     },
     {
       "cell_type": "code",
@@ -378,7 +380,7 @@
         "#| include: true\n",
         "Client requested connection close from node 2 (org.apache.kafka.clients.NetworkClient)"
       ],
-      "id": "7e83c5d1",
+      "id": "55f9c2a9",
       "execution_count": null,
       "outputs": []
     },
@@ -388,7 +390,7 @@
       "source": [
         "To ensure data replication, broker-1 sends fetch request messages to broker-2. In this case, the client reports an error that it is not sending a fetch request to receive data for replication because broker-2 is no longer available."
       ],
-      "id": "456ea32d"
+      "id": "789a1c1f"
     },
     {
       "cell_type": "code",
@@ -398,7 +400,7 @@
         "#| include: true\n",
         "Error sending fetch request (sessionId=700883982, epoch=INITIAL) to node 2:"
       ],
-      "id": "23d730a2",
+      "id": "3ccf22a8",
       "execution_count": null,
       "outputs": []
     },
@@ -408,7 +410,7 @@
       "source": [
         "The next log indicates that broker-1 stopped fetching data from broker-2. The fact that broker-1 was fetching data and then stopped doing so indicates that broker-2, which was shut down, was the partition leader."
       ],
-      "id": "43e81296"
+      "id": "6bd561b5"
     },
     {
       "cell_type": "code",
@@ -418,7 +420,7 @@
         "#| include: true\n",
         "Removed fetcher for partitions Set(_confluent-command-0, transactions-0)"
       ],
-      "id": "0fb92f88",
+      "id": "ecc03f8a",
       "execution_count": null,
       "outputs": []
     },
@@ -428,7 +430,7 @@
       "source": [
         "Next, a new partition leader is elected, from which other brokers with partition replicas will fetch data for replication. Broker-3 was chosen as the new leader, and fetch requests will be sent to it for partition replication."
       ],
-      "id": "3c8612cd"
+      "id": "6b413e74"
     },
     {
       "cell_type": "code",
@@ -438,7 +440,7 @@
         "#| include: true\n",
         "Added fetcher to broker 3 for partitions HashMap(transactions-1 -> InitialFetchState(... BrokerEndPoint(id=3, host=broker-3:19092),1,157))"
       ],
-      "id": "3a445aac",
+      "id": "5306fa51",
       "execution_count": null,
       "outputs": []
     },
@@ -448,7 +450,7 @@
       "source": [
         "Then, a confirmation is received in the logs that the process responsible for data replication from broker-2 has been closed - so as not to try to download data from broker-2, which is not available."
       ],
-      "id": "78064827"
+      "id": "b505555c"
     },
     {
       "cell_type": "code",
@@ -458,7 +460,7 @@
         "#| include: true\n",
         "ReplicaFetcherThread-0-2: Shutting down ... Shutdown completed"
       ],
-      "id": "579ce3a2",
+      "id": "7f55336e",
       "execution_count": null,
       "outputs": []
     },
@@ -472,7 +474,7 @@
         "\n",
         "In order to verify the amount of data stored in Redis and Cassandra, a special Python script was developed, as shown below:"
       ],
-      "id": "66295a2e"
+      "id": "b243dec0"
     },
     {
       "cell_type": "code",
@@ -513,7 +515,7 @@
         "else:\n",
         "    print(\"All messages persisted successfully!\")"
       ],
-      "id": "065d4bee",
+      "id": "b457f3c5",
       "execution_count": null,
       "outputs": []
     },
@@ -533,7 +535,7 @@
         "\n",
         "Kafka met the requirements, but if the number of hosts in the cluster is limited, consider using inter-cluster Kafka replication, such as Mirror Maker 2."
       ],
-      "id": "798b79b0"
+      "id": "9245df06"
     }
   ],
   "metadata": {
@@ -541,7 +543,7 @@
       "name": "python3",
       "language": "python",
       "display_name": "Python 3 (ipykernel)",
-      "path": "C:\\Python312\\share\\jupyter\\kernels\\python3"
+      "path": "C:\\Users\\Wojci\\AppData\\Local\\R\\cache\\R\\reticulate\\uv\\cache\\archive-v0\\OFvl4FO9H3d81VF8b03zh\\share\\jupyter\\kernels\\python3"
     }
   },
   "nbformat": 4,

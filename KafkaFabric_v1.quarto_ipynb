@@ -33,7 +33,7 @@
         "\n",
         "For a Django application to be monitored using the system described, it must contain a Kafka producer instance. This can be a tool—utlis—in the appropriate folder. A sample implementation is shown below."
       ],
-      "id": "7edc0754"
+      "id": "297e38b3"
     },
     {
       "cell_type": "code",
@@ -90,7 +90,7 @@
         "    except TypeError as e:\n",
         "        print(f\"[kafka_utils] ❌ Error: {e}. Try again\")"
       ],
-      "id": "a068e4ec",
+      "id": "41dec470",
       "execution_count": null,
       "outputs": []
     },
@@ -100,7 +100,7 @@
       "source": [
         "The above function can be implemented in a view that will be called in appropriate places in the application."
       ],
-      "id": "15b3e2b6"
+      "id": "4eb93bf1"
     },
     {
       "cell_type": "code",
@@ -127,7 +127,7 @@
         "    \n",
         "    return JsonResponse({\"success\": True, \"message\": f\"Bought {diamond.name}!\"})"
       ],
-      "id": "40be9474",
+      "id": "1222c59d",
       "execution_count": null,
       "outputs": []
     },
@@ -267,7 +267,7 @@
         "\n",
         "[Watch video on YouTube](https://www.youtube.com/watch?v=JJ2UOnfZYcE)"
       ],
-      "id": "3fc6ba59"
+      "id": "eb8eccd6"
     }
   ],
   "metadata": {
@@ -275,7 +275,7 @@
       "name": "python3",
       "language": "python",
       "display_name": "Python 3 (ipykernel)",
-      "path": "C:\\Python312\\share\\jupyter\\kernels\\python3"
+      "path": "C:\\Users\\Wojci\\AppData\\Local\\R\\cache\\R\\reticulate\\uv\\cache\\archive-v0\\OFvl4FO9H3d81VF8b03zh\\share\\jupyter\\kernels\\python3"
     }
   },
   "nbformat": 4,

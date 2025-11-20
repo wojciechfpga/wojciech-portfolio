@@ -23,7 +23,9 @@ The cluster code is located in the following repository:
 
 To verify Kafka's fault tolerance and scalability, a cluster of hosts must be developed, which includes a data generator that writes messages to a Kafka topic and to Redis. Another element is at least three Kafka brokers to establish quorum to determine whether messages in a topic are valid after the loss of one host. A Zookeeper metadata server, although this can be replaced by an additional controller function on one or more hosts, and Kafka Connect to receive messages from a Kafka topic and write them to Cassandra. A diagram of this message flow is shown below:
 
-![Picture 1. Project of Data Architectur](KafkaSostatnie.png) Below is a shortened code in docker-compose that implements the above architecture in a cluster.
+![Picture 1. Project of Data Architectur](KafkaSostatnie.png) 
+
+Below is a shortened code in docker-compose that implements the above architecture in a cluster.
 
 ```{python}
 #| eval: false
