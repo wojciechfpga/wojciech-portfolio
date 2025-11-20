@@ -1127,23 +1127,38 @@
   {
     "objectID": "kafka_redis_v1.html",
     "href": "kafka_redis_v1.html",
-    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka.",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
     "section": "",
-    "text": "The main goal of this project is to create an interactive dashboard illustrating the difference between the average price of diamond production costs (which remains constant for each diamond) and the average market value of diamonds sold. This will allow for observing trends in the diamond market.\nA decision tree, whose parameters will be calculated using the scikit-learn package, will be used to determine the market value of diamonds.\nData regarding current diamond sales will be generated using a Python script generator. This data will be transmitted using Kafka and sent to Flink. Flink will calculate the market value using a Scala implementation of the decision tree. Kafka will then suggest prices for individual diamonds to a new Kafka topic. The data will then be sent to Kafka Connect - Redis Sink, which will store it in Redis. The data from Redis will be read by a Python script implementing the Real-Time Dashboard.\nCode:\nGitHub Repo"
+    "text": "The main goal of this project is to create an interactive dashboard illustrating the difference between the average price of diamond production costs (which remains constant for each diamond) and the average market value of diamonds sold. This will allow for observing trends in the diamond market.\nA decision tree, whose parameters will be calculated using the scikit-learn package, will be used to determine the market value of diamonds.\nData regarding current diamond sales will be generated using a Python script generator. This data will be transmitted using Kafka and sent to Flink. Flink will calculate the market value using a Scala implementation of the decision tree. Kafka will then suggest prices for individual diamonds to a new Kafka topic. The data will then be sent to Kafka Connect - Redis Sink, which will store it in Redis. The data from Redis will be read by a Python script implementing the Real-Time Dashboard.\nCode:\nGitHub Repo",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
   },
   {
     "objectID": "kafka_redis_v1.html#introduction",
     "href": "kafka_redis_v1.html#introduction",
-    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka.",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
     "section": "",
-    "text": "The main goal of this project is to create an interactive dashboard illustrating the difference between the average price of diamond production costs (which remains constant for each diamond) and the average market value of diamonds sold. This will allow for observing trends in the diamond market.\nA decision tree, whose parameters will be calculated using the scikit-learn package, will be used to determine the market value of diamonds.\nData regarding current diamond sales will be generated using a Python script generator. This data will be transmitted using Kafka and sent to Flink. Flink will calculate the market value using a Scala implementation of the decision tree. Kafka will then suggest prices for individual diamonds to a new Kafka topic. The data will then be sent to Kafka Connect - Redis Sink, which will store it in Redis. The data from Redis will be read by a Python script implementing the Real-Time Dashboard.\nCode:\nGitHub Repo"
+    "text": "The main goal of this project is to create an interactive dashboard illustrating the difference between the average price of diamond production costs (which remains constant for each diamond) and the average market value of diamonds sold. This will allow for observing trends in the diamond market.\nA decision tree, whose parameters will be calculated using the scikit-learn package, will be used to determine the market value of diamonds.\nData regarding current diamond sales will be generated using a Python script generator. This data will be transmitted using Kafka and sent to Flink. Flink will calculate the market value using a Scala implementation of the decision tree. Kafka will then suggest prices for individual diamonds to a new Kafka topic. The data will then be sent to Kafka Connect - Redis Sink, which will store it in Redis. The data from Redis will be read by a Python script implementing the Real-Time Dashboard.\nCode:\nGitHub Repo",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
   },
   {
     "objectID": "kafka_redis_v1.html#data-architecture-design",
     "href": "kafka_redis_v1.html#data-architecture-design",
-    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka.",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
     "section": "1. Data architecture design",
-    "text": "1. Data architecture design\nThe data architecture discussed in the introduction is presented in the figure below:\n\n\n\nPicture 1. Project of Data Architectur\n\n\n\ndata(\"diamonds\")\n\nWarning in data(\"diamonds\"): zbiór danych 'diamonds' nie został znaleziony"
+    "text": "1. Data architecture design\nThe data architecture discussed in the introduction is presented in the figure below:\n It’s worth noting that some components contain more than one host. For example, Flink requires a client to generate a job graph, a jobmanager to manage clusters, and a taskmanager to execute tasks—all on separate hosts within the cluster.\nBelow is a shorthand version of the code implementing the architecture in Docker-Compose:\n\nservices:\n  message-generator:\n    build: ./message-generator\n    ...\n\n  flink-jobmanager:\n    build: ./flink-app\n    ...\n\n  flink-taskmanager:\n    build: ./flink-app\n    ...\n\n  broker-1:\n    image: apache/kafka:latest\n    container_name: broker-1\n    ports:\n      - 29092:9092\n    ...\n\n  job-submitter:\n    build: ./flink-app\n    ...\n\n  schema-registry:\n    image: confluentinc/cp-schema-registry:latest\n    depends_on:\n      - broker-1\n    ...\n\n  redis:\n    image: redis/redis-stack:latest\n    ports:\n      - \"6379:6379\"\n      - \"8001:8001\"\n\n  kafka-connect:\n    build: ./kafka-connect-redis\n    ...\n\n\n  configurator:\n    build: ./configurator\n    ...\n\n  streamlit-dashboard:\n    build: ./streamlit-dashboard\n    depends_on:\n      - redis\n    ...\n\nIt’s worth mentioning that there are hosts with auxiliary elements, such as Schema Registry. This allows for easy schema management and minimizes code changes when the structure of the transferred data changes.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
   },
   {
     "objectID": "Kafka_Scalability.html",
@@ -1215,6 +1230,90 @@
       "Home",
       "Data Analysis and Data Engineering",
       "Scalability and data replication in Kafka - testing the resilience of a Kafka cluster to broker host failures. Cassandra and Kafka Connect basics"
+    ]
+  },
+  {
+    "objectID": "kafka_redis_v1.html#data-generator",
+    "href": "kafka_redis_v1.html#data-generator",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
+    "section": "2. Data generator",
+    "text": "2. Data generator\nThe main task of the data generator is to generate diamond parameters, its base price (based on the Diamonds dataset from Seaborn/ggplot2), and its sales volume. This data is saved to the appropriate Kafka topic. Before the message generation process begins, a Kafka broker is configured and the topic is created.\nBelow is the most important part of the generator code:\n\nimport time\nfrom data_generator import diamond_data_generator\nfrom producer import send_diamond_event, close_producer\n\n\nif __name__ == \"__main__\":\n    print(\"Starting continuous generation and sending of diamond events to Kafka...\")\n\n    generator = diamond_data_generator()\n\n    try:\n        while True:\n            event = next(generator)\n            send_diamond_event(event)\n\n            print(f\"Sent event (ID: {event['id'][:8]}..., Carat: {event['carat']:.2f})\")\n\n            time.sleep(0.1)\n\n    except KeyboardInterrupt:\n        print(\"\\nGenerator stopped by user.\")\n\n    finally:\n        close_producer()",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
+  },
+  {
+    "objectID": "kafka_redis_v1.html#kafka-broker",
+    "href": "kafka_redis_v1.html#kafka-broker",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
+    "section": "3. Kafka broker",
+    "text": "3. Kafka broker\nThe Kafka broker in the project is configured using environment variables defined in Docker-Compose. This broker has two threads: one with diamond parameters and sales volume. The producer is the data generator discussed in the previous section. The second thread contains basic diamond parameters, including the ID and a suggested price based on sales volume. Data from this second thread is sent via Kafka Sink from Flink to Kafka Connect, which stores it in Redis.\nData from and to Kafka will be transferred in Avro format.\nReplication and scalability mechanism was not implemented - multiple partitions for each topic, numerous broker instances - the topic of scalability and replication was discussed in a separate paper.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
+  },
+  {
+    "objectID": "kafka_redis_v1.html#flink",
+    "href": "kafka_redis_v1.html#flink",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
+    "section": "4. Flink",
+    "text": "4. Flink\nFlink’s main task is to calculate the market value of a diamond based on its sales volume. To accomplish this, a DataStream object was created based on the Kafka Source with a topic from the data generator. Then, using mapping and a function call, a modified DataStream object was created, which was then written to the appropriate Kafka topic using the Flink Kafka Sink. This is demonstrated in the following code:\n\nobject FlinkDiamondJob {\n  def main(args: Array[String]): Unit = {\n    val env = StreamExecutionEnvironment.getExecutionEnvironment\n    // env.setParallelism(1) \n\n    val source = KafkaSource.builder[Diamond]()\n      .setBootstrapServers(adressBroker)\n      .setTopics(inputTopic)\n      .setGroupId(idOfInputGroup)\n      .setStartingOffsets(OffsetsInitializer.latest())\n      .setValueOnlyDeserializer(new DiamondAvroDeserializer(schemaRegistryUrl))\n      .build()\n\n    val inputStream: DataStream[Diamond] = env.fromSource(\n      source,\n      WatermarkStrategy.noWatermarks[Diamond](),\n      \"kafka-source-diamonds\"\n    )\n\n    implicit val avroTypeInfo: TypeInformation[GenericRecord] = \n      new GenericRecordAvroTypeInfo(OutputSchema.DiamondScore)\n\n    val outputStream: DataStream[GenericRecord] = inputStream\n      .map { diamond =&gt;\n        val pre = DiamondPreprocessor.preprocess(diamond)\n        val score = DiamondPriceTreePredictor.predict(pre)\n\n        val record = new GenericData.Record(OutputSchema.DiamondScore)\n        record.put(\"id\", diamond.id)\n        record.put(\"price\", diamond.price)\n        record.put(\"calculated_score\", score)\n        \n        record.asInstanceOf[GenericRecord] \n      } \n      .name(kafkaOutStreamName)\n\n    val sink: KafkaSink[GenericRecord] = KafkaSink.builder[GenericRecord]()\n      .setBootstrapServers(adressBroker)\n      .setRecordSerializer(\n        KafkaRecordSerializationSchema.builder[GenericRecord]()\n          .setTopic(outputTopic)\n          .setValueSerializationSchema(\n            ConfluentRegistryAvroSerializationSchema.forGeneric(\n              s\"$outputTopic-value\",\n              OutputSchema.DiamondScore,\n              schemaRegistryUrl\n            )\n          )\n          .build()\n      )\n      .build()\n\n    outputStream\n      .sinkTo(sink)\n      .name(kafkaSinkName)\n\n    env.execute(\"Flink Diamond Price Prediction Job\")\n  }\n}\n\nThe code above shows that a function has been implemented to calculate the suggested value—calculated_score—using a decision tree. The decision tree parameters and data transformations were calculated in the following notebook using the scikit-learn package (DecisionTreeRegressor class), and then the resulting decision tree and transformations were ported to Scala. Link to the notebook:\nNotebook - Python - scikit-learn\nThe resulting decision tree structure was implemented in the Scala language.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
+  },
+  {
+    "objectID": "kafka_redis_v1.html#kafka-connect---redis-sink",
+    "href": "kafka_redis_v1.html#kafka-connect---redis-sink",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
+    "section": "5. Kafka Connect - Redis Sink",
+    "text": "5. Kafka Connect - Redis Sink\nKafka Connect is used to write data from a Kafka topic to Redis. For it to work correctly, an HTTP POST message with the following dictionary (as JSON) attached must be sent to the appropriate URL (specifying the port and URI):\n\npayload = {\n  \"name\": CONNECTOR_NAME,\n  \"config\": {\n    \"connector.class\": \"com.redis.kafka.connect.RedisSinkConnector\",\n    \"topics\": \"diamonds-output-full\",\n    \"redis.uri\": \"redis://redis:6379\", \n    \"redis.type\": \"JSON\",           \n    \"redis.keyspace\": \"diament\",    \n    \"key.converter\": \"org.apache.kafka.connect.storage.StringConverter\",\n    \"value.converter\": \"io.confluent.connect.avro.AvroConverter\",\n    \"value.converter.schema.registry.url\": \"http://schema-registry:8081\",\n    \"value.converter.schemas.enable\": \"true\",\n    \"transforms\": \"createKey,extractString\", \n    \"transforms.createKey.type\": \"org.apache.kafka.connect.transforms.ValueToKey\",\n    \"transforms.createKey.fields\": \"id\",\n    \"transforms.extractString.type\": \"org.apache.kafka.connect.transforms.ExtractField$Key\",\n    \"transforms.extractString.field\": \"id\"\n  }\n}\n\nThe container containing the Kafka Connect - Redis Sink is created based on the following Dockerfile:\n\nFROM confluentinc/cp-kafka-connect:latest\n\nRUN confluent-hub install --no-prompt redis/redis-kafka-connect:latest\n\nThe basis for creating a container is the Confluent Kafka Connect base image. It includes basic Confluent plugins.\nThen the confluent-hub install command in the base container’s CLI is run, which installs Redis support into the container with Kafka Connect.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
+  },
+  {
+    "objectID": "kafka_redis_v1.html#redis",
+    "href": "kafka_redis_v1.html#redis",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
+    "section": "5. Redis",
+    "text": "5. Redis\nThe main purpose of Redis is to store data about diamonds and their scores for quick access by applications such as Streamplit. Below are the parameters for storing data using the Redis-CLI:\n\n\n\nPicture 2. Redis CLI\n\n\nIt is visible that the data type is stream and sample data stored regarding diamond sales.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
+  },
+  {
+    "objectID": "kafka_redis_v1.html#streamlit-app",
+    "href": "kafka_redis_v1.html#streamlit-app",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
+    "section": "6. Streamlit App",
+    "text": "6. Streamlit App\nA real-time dashboard—refreshed every two seconds for demonstration purposes—was created using the Streamlit Python library. Below is a screenshot of the dashboard:\n\n\n\nPicture 3. Streamlit Real-Time Dashboard\n\n\nMain app code is belowe:\n\nfrom config.settings import setup_page\nfrom dashboard.layout import render_sidebar\nfrom dashboard.live_dashboard import render_live_dashboard\n\nsetup_page()\n\nrender_sidebar()\n\nrender_live_dashboard()\n\nIt is clearly visible that the application consists of three modules that run one after the other. Most important is call the dashboard:\n\nimport time\nimport pandas as pd\nimport streamlit as st\nimport altair as alt\n\nfrom data.stream_loader import load_stream\n\n\n@st.fragment(run_every=\"2s\")\ndef render_live_dashboard():\n    \"\"\"Main real-time dashboard fragment.\"\"\"\n\n    df = load_stream()\n\n    if df.empty:\n        st.warning(\"Waiting for data stream from Flink...\")\n        return\n\n    with st.container():\n        col1, col2, col3 = st.columns(3)\n        col1.metric(\"Avg Score\", f\"{df['calculated_score'].mean():.2f}\")\n        col2.metric(\"Avg Price\", f\"{df['price'].mean():.0f} USD\")\n        col3.metric(\"Buffer Size\", len(df))\n\n    st.subheader(\"Live Market Trends\")\n\n    columns_to_drop = ['id', 'timestamp']\n    df_for_chart = df.drop(columns=columns_to_drop, errors='ignore')\n\n    chart_data = df_for_chart.melt(\n        \"datetime\",\n        var_name=\"Metric\",\n        value_name=\"Value\",\n    )\n\n    chart = (\n        alt.Chart(chart_data)\n        .mark_line()\n        .encode(\n            x=alt.X(\"datetime\", axis=alt.Axis(format=\"%H:%M:%S\", title=\"Time\")),\n            y=alt.Y(\"Value\", title=\"Value\"),\n            color=\"Metric\",\n        )\n        .properties(height=400)\n    )\n\n    st.altair_chart(chart, use_container_width=True)\n\n    st.caption(f\"Last updated: {time.strftime('%H:%M:%S')}\")\n\nBelow is a video showing how the dashboard works:\nYouTube Video",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
+    ]
+  },
+  {
+    "objectID": "kafka_redis_v1.html#summary",
+    "href": "kafka_redis_v1.html#summary",
+    "title": "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka",
+    "section": "7. Summary",
+    "text": "7. Summary\nAn analytical dashboard was created based on a Kafka data stream, which is modified using Flink. It allows for easy viewing of the difference between a diamond’s base value—the production value—and the market price resulting from increased demand. This allows for easy observation of what’s happening in the diamond market, how expensive diamonds are on the market, and what their market value is, allowing for appropriate investment management.\nThe Redis container allows for quick information on valuation data for individual diamonds—how their market value is changing, which is critical in applications requiring quick access to valuations where every second is crucial. Therefore, the Redis container with market score valuations can be used in automatic price recommendation systems or in stock trading.",
+    "crumbs": [
+      "Home",
+      "Data Analysis and Data Engineering",
+      "Real-Time dashboard in Streamlit receiving price predictions from a Decision Tree implemented in Flink and sent via Kafka"
     ]
   }
 ]
